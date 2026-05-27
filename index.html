@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AirShare – iPhone ↔ Windows 11 ファイル共有ツール</title>
+  
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- QRコードスキャンライブラリ -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <!-- QRコード生成ライブラリ -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260527">
+  
+  <!-- QRエリア ボタン行 専用スタイル -->
+  <style>
+    /* 外側コンテナ: table で確実に3等分 */
+    .qr-action-row {
+      display: table;
+      table-layout: fixed;
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 8px 0;
+      margin-left: -8px;
+      margin-right: -8px;
+      width: calc(100% + 16px);
+    }
+    /* 各セル */
+    .qr-action-cell {
+      display: table-cell;
+      width: 33.333%;
+      vertical-align: middle;
+    }
+    /* ボタン本体 */
+    .qr-action-btn {
+      display: block;
+      width: 100%;
+      text-align: center;
+      padding: 9px 2px;
+      font-size: 0.73rem;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      border: 1px solid #2a2f45;
+      border-radius: 8px;
+      background: #1f2436;
+      color: #8b91aa;
+      box-sizing: border-box;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .qr-action-btn i { margin-right: 3px; }
+    .qr-action-share { color: #4f8ef7; border-color: #2a2f45; }
+    .qr-action-cancel { color: #ef4444; }
+    /* focusリング（青枠）を全ボタンで非表示 */
+    .qr-action-btn:focus { outline: none; }
+    .qr-action-btn:focus-visible { outline: none; }
+    [data-theme="light"] .qr-action-btn {
+      background: #eef0f8; border-color: #d4d8ec; color: #555b7a;
+    }
+    [data-theme="light"] .qr-action-share { color: #3b7ef6; border-color: #3b7ef6; }
+    [data-theme="light"] .qr-action-cancel { color: #dc2626; }
+
+    /* ════════════════════════════════════════════════
+       チャット機能
+       ════════════════════════════════════════════════ */
+    .chat-area {
+      display: none;
+      flex-direction: column;
+      border-top: 1px solid var(--border);
+      margin-top: 20px;
+      padding-top: 16px;
+      height: 320px;
+      box-sizing: border-box;
+    }
+    .chat-header {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 4px;
+    }
+    .chat-msg {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 12px;
+      max-width: 75%;
+      font-size: 0.85rem;
+      word-wrap: break-word;
+    }
+    .chat-msg.self {
+      align-self: flex-end;
+      background: var(--accent);
+      color: white;
+      border-radius: 12px 4px 12px 12px;
+    }
+    .chat-msg.other {
+      align-self: flex-start;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px 12px 12px 12px;
+    }
+    .chat-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .chat-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .btn-send-msg {
+      padding: 10px 12px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity .2s;
+      font-size: 1rem;
+    }
+    .btn-send-msg:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════
+       HEADER
+  ══════════════════════════════════════ -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <i class="fa-solid fa-bolt-lightning"></i>
+        <span>AirShare</span>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="btnTheme" title="テーマ切替">
+          <i class="fa-solid fa-sun" id="themeIcon"></i>
+        </button>
+        <button class="icon-btn" id="btnCreator" title="制作者情報">
+          <i class="fa-solid fa-circle-info"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════
+       セットアップ画面
+  ══════════════════════════════════════ -->
+  <div id="setupScreen" class="screen active">
+    <div class="setup-card">
+      <div class="setup-header">
+        <h1>デバイス間でファイルを共有</h1>
+        <p>iPhone ↔ Windows 11 をブラウザだけで繋ぐ<br>AirDrop 風ファイル転送ツール</p>
+      </div>
+
+      <div class="setup-options">
+
+        <!-- ① QR表示エリア（ルーム作成後に展開・ボタンの上に配置） -->
+        <div id="setupQrArea" class="setup-qr-area" style="display:none">
+          <div class="setup-qr-inner">
+            <div class="setup-qr-canvas-wrap">
+              <canvas id="setupQrImg"></canvas>
+            </div>
+            <div class="setup-qr-info">
+              <p class="setup-qr-label">ルームID</p>
+              <p class="setup-qr-id" id="setupQrRoomId"></p>
+              <p class="setup-qr-hint">
+                <i class="fa-solid fa-mobile-screen"></i>
+                スマートフォンの「スキャンして参加」でこのQRを読み取ってください
+              </p>
+              <div class="setup-qr-status">
+                <span class="dot orange"></span>
+                <span id="setupQrStatusText">スマートフォンの参加を待っています...</span>
+              </div>
+              <div class="qr-action-row">
+                <div class="qr-action-cell">
+                  <button class="qr-action-btn" id="btnSetupCopyId">
+                    <i class="fa-regular fa-copy"></i><span>コピー</span>
+                  </button>
+                </div>
+                <div class="qr-action-cell">
+                  <button class="qr-action-btn qr-action-share" id="btnSetupShare">
+                    <i class="fa-solid fa-arrow-up-from-bracket"></i><span>共有</span>
+                  </button>
+                </div>
+                <div class="qr-action-cell">
+                  <button class="qr-action-btn qr-action-cancel" id="btnSetupCancelRoom">
+                    <i class="fa-solid fa-xmark"></i><span>キャンセル</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ① QRコード発行でルーム作成 -->
+        <div class="option-card option-card-create">
+          <div class="option-card-top">
+            <div class="option-icon"><i class="fa-solid fa-qrcode"></i></div>
+            <div class="option-text">
+              <strong>新しいルームを作成</strong>
+              <span>QRコードを発行します。スマートフォンで読み取ると自動でルームに参加できます。</span>
+            </div>
+          </div>
+          <button class="btn-primary btn-create-room" id="btnCreateRoom">
+            <i class="fa-solid fa-qrcode"></i> QRコードを発行する
+          </button>
+        </div>
+
+        <div class="or-divider"><span>または</span></div>
+
+        <!-- ② ID入力で参加 -->
+        <div class="option-card option-card-column">
+          <div class="option-card-top">
+            <div class="option-icon"><i class="fa-solid fa-keyboard"></i></div>
+            <div class="option-text">
+              <strong>ルームIDを入力して参加</strong>
+              <span>もう一方のデバイスに表示されたルームIDを手入力</span>
+            </div>
+          </div>
+          <div class="join-row">
+            <input type="text" id="roomInput" class="join-input" placeholder="ルームID（例：ABC-1234）" maxlength="11">
+            <button class="btn-primary" id="btnJoinRoom">
+              <i class="fa-solid fa-arrow-right-to-bracket"></i> 参加
+            </button>
+          </div>
+          <!-- エラーメッセージ -->
+          <div id="joinError" class="join-error" style="display:none"></div>
+        </div>
+
+        <!-- ③ QRスキャンで参加 -->
+        <div class="option-card option-card-column">
+          <div class="option-card-top">
+            <div class="option-icon"><i class="fa-solid fa-camera"></i></div>
+            <div class="option-text">
+              <strong>QRコードをスキャン</strong>
+              <span>カメラでQRコードを読み取って参加</span>
+            </div>
+          </div>
+          <button class="btn-primary btn-full" id="btnOpenScanner">
+            <i class="fa-solid fa-camera"></i> スキャンして参加
+          </button>
+        </div>
+      </div>
+
+      <p class="setup-note">
+        <i class="fa-solid fa-shield-halved"></i>
+        共有データは一時的なものです。ルームを退出するとファイルは削除されます。
+      </p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       メイン画面（ファイル共有エリア）
+  ══════════════════════════════════════ -->
+  <div id="mainScreen" class="screen">
+
+    <div class="room-info-bar">
+      <div class="room-info-left">
+        <span class="room-id-display">
+          <i class="fa-solid fa-hashtag"></i>
+          <span id="roomIdDisplay"></span>
+        </span>
+      </div>
+      <div class="room-info-right">
+        <button class="icon-btn" id="btnHeaderShowQR" title="QRを表示">
+          <i class="fa-solid fa-qrcode"></i>
+        </button>
+        <button class="icon-btn" id="btnHeaderCopyRoom" title="ルームIDをコピー">
+          <i class="fa-solid fa-copy"></i>
+        </button>
+        <button class="icon-btn" id="btnLeaveRoom" title="退出">
+          <i class="fa-solid fa-sign-out-alt"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- ドラッグ&ドロップ / ファイル選択 -->
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-inner">
+        <div class="drop-hint" id="dropHint">
+          <p class="drop-title">ファイルをドラッグ&ドロップ</p>
+          <p class="drop-sub">または</p>
+          <label for="fileInput" id="fileInputLabel" class="file-select-link">
+            <i class="fa-solid fa-folder-open"></i> ファイルを選択
+          </label>
+          <input type="file" id="fileInput" multiple>
+          <p class="drop-hint">最大50MBまで、複数ファイル対応</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ファイルリスト -->
+    <div id="fileList" class="file-list"></div>
+
+    <!-- チャットエリア -->
+    <div id="chatArea" class="chat-area" style="display:none">
+      <div class="chat-header">
+        <i class="fa-solid fa-comments"></i> メッセージ
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" class="chat-input" placeholder="メッセージを入力..." autocomplete="off">
+        <button id="btnSendMessage" class="btn-send-msg">
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- アクションバー -->
+    <div class="action-bar">
+      <button class="btn-sm" id="btnRefresh">
+        <i class="fa-solid fa-arrows-rotate"></i> 更新
+      </button>
+      <button class="btn-sm danger" id="btnClearAll" style="display:none">
+        <i class="fa-solid fa-trash"></i> すべて削除
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════
+       制作者モーダル
+  ══════════════════════════════════════ -->
+  <div id="creatorModal" class="modal" style="display:none">
+    <div class="modal-content creator-modal">
+      <button class="close-btn" id="btnCloseCreator">×</button>
+      <div class="creator-card">
+        <div class="creator-avatar">
+          <i class="fa-solid fa-user-circle"></i>
+        </div>
+        <p class="creator-name">YOUICHI HORIKAWA</p>
+        <p class="creator-label">Creator / Developer</p>
+      </div>
+      <p class="creator-desc">
+        iPhone と Windows 間のシームレスなファイル共有を実現する<br>
+        AirShare を設計・開発しました。
+      </p>
+    </div>
+  </div>
+
+  <!-- QRコード表示モーダル -->
+  <div id="qrModal" class="modal" style="display:none">
+    <div class="modal-content qr-modal">
+      <button class="close-btn" id="btnCloseQR">×</button>
+      <div class="qr-display">
+        <canvas id="qrCanvas" width="200" height="200"></canvas>
+        <p id="qrRoomId" class="qr-room-id"></p>
+        <button class="btn-sm" id="btnCopyFromQR">
+          <i class="fa-solid fa-copy"></i> ルームIDをコピー
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- スキャナーモーダル -->
+  <div id="scanModal" class="modal" style="display:none">
+    <div class="modal-content scan-modal">
+      <button class="close-btn" id="btnCloseScan">×</button>
+      <video id="scanVideo"></video>
+      <canvas id="scanCanvas" style="display:none"></canvas>
+    </div>
+  </div>
+
+  <!-- プレビューモーダル -->
+  <div id="previewModal" class="modal" style="display:none">
+    <div class="modal-content preview-modal">
+      <button class="close-btn" id="btnClosePreview">×</button>
+      <div id="previewContent" class="preview-content"></div>
+      <button class="btn-primary" id="btnDownload">
+        <i class="fa-solid fa-download"></i> ダウンロード
+      </button>
+    </div>
+  </div>
+
+  <!-- トーストコンテナ -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+---
+description: Core AI coding rules for this project
+alwaysApply: true
+---
+
+# Core Rules
+
+- Respond in Japanese unless the user asks for another language.
+- Inspect relevant files before editing and follow the existing project style.
+- For non-trivial changes, use Plan -> Confirm/Proceed -> Code.
+- When requirements are ambiguous, ask or state the assumption before making risky changes.
+- Make small, focused changes and avoid unrelated refactors.
+- Keep functions small and single-purpose.
+- Use precise names and one term per concept.
+- Separate queries from commands; avoid hidden mutation.
+- Keep happy paths readable and isolate error handling clearly.
+- Add abstractions only when they reduce real duplication or clarify a real concept.
+- Comments should explain rationale, constraints, or external contracts.
+- Handle expected errors explicitly, especially async and user-facing failures.
+- Preserve user changes. Do not overwrite unrelated edits.
+- Use `rg` or `rg --files` first when searching.
+- Use `apply_patch` for manual edits.
+- Document exact build, lint, test, and dev-server commands in `AGENTS.md` once the project has them.
+- After frontend changes, verify desktop and mobile widths, browser console errors, and changed assets.
+- If no automated verification exists, report that verification was limited to static/manual browser checks.
+- Ask before adding new production dependencies.
+- Never commit secrets, API keys, tokens, passwords, or `.env` files.
+- Do not commit, push, create PRs, delete files, or run destructive commands unless the user asks.
