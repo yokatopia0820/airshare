@@ -134,16 +134,12 @@ function applyRoomFromUrl() {
   }
 }
 
-function createRoom() {
+async function createRoom() {
   playClick();
   currentRoomId = generateRoomId();
-  $("setupQrRoomId").textContent = currentRoomId;
-  $("setupQrArea").style.display = "block";
-  $("setupQrStatusText").textContent = API_URL
-    ? "スマートフォンの参加を待っています..."
-    : "同期サーバー未設定です。別端末との共有はまだできません。";
-  drawQr("setupQrImg", roomUrl(currentRoomId));
-  showToast("ルームを作成しました", "success");
+  await enterRoom(currentRoomId);
+  showRoomQr();
+  showToast("ルームに入りました", "success");
 }
 
 function cancelRoomCreation() {
