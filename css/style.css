@@ -473,7 +473,7 @@ button {
 }
 
 .sync-status {
-  margin: 12px 16px 0;
+  margin: 14px 0 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
@@ -483,6 +483,10 @@ button {
   font-size: .84rem;
   line-height: 1.45;
   flex-shrink: 0;
+}
+
+#mainScreen > .sync-status {
+  margin: 12px 16px 0;
 }
 
 .sync-status.connected {

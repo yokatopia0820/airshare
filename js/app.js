@@ -666,8 +666,18 @@ function updateSyncStatus() {
     status.id = "syncStatus";
     status.className = "sync-status";
   }
-  const target = document.querySelector(".screen.active") || $("setupScreen") || $("mainScreen");
-  if (target && status.parentElement !== target) target.prepend(status);
+
+  const setupCard = document.querySelector("#setupScreen.active .setup-card");
+  const mainScreen = $("mainScreen");
+  const target = setupCard || (mainScreen?.classList.contains("active") ? mainScreen : null);
+  if (target && status.parentElement !== target) {
+    if (setupCard) {
+      const note = setupCard.querySelector(".setup-note");
+      setupCard.insertBefore(status, note || null);
+    } else {
+      target.prepend(status);
+    }
+  }
 
   if (hasSyncBackend()) {
     status.className = "sync-status connected";
