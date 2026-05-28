@@ -1,0 +1,8 @@
+name = "airshare-api"
+main = "worker.js"
+compatibility_date = "2026-05-28"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "airshare"
+database_id = "replace-with-your-d1-database-id"

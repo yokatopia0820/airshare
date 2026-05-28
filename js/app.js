@@ -1,4 +1,4 @@
-const API_URL = window.AIRSHARE_API_URL || localStorage.getItem("airshare_api_url") || "";
+const API_URL = getConfiguredApiUrl();
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const POLL_INTERVAL_MS = 4000;
@@ -14,10 +14,31 @@ const $ = id => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", init);
 
+function getConfiguredApiUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return (
+    window.AIRSHARE_API_URL ||
+    params.get("api") ||
+    localStorage.getItem("airshare_api_url") ||
+    ""
+  ).trim().replace(/\/$/, "");
+}
+
+function persistApiUrlFromQuery() {
+  if (!API_URL) return;
+  localStorage.setItem("airshare_api_url", API_URL);
+}
+
+function hasSyncBackend() {
+  return Boolean(API_URL);
+}
+
 function init() {
+  persistApiUrlFromQuery();
   restoreTheme();
   bindEvents();
   applyRoomFromUrl();
+  updateSyncStatus();
 }
 
 function bindEvents() {
@@ -120,7 +141,7 @@ function createRoom() {
   $("setupQrArea").style.display = "block";
   $("setupQrStatusText").textContent = API_URL
     ? "スマートフォンの参加を待っています..."
-    : "ローカル確認モードです。公開時はバックエンドAPIを設定してください。";
+    : "同期サーバー未設定です。別端末との共有はまだできません。";
   drawQr("setupQrImg", roomUrl(currentRoomId));
   showToast("ルームを作成しました", "success");
 }
@@ -150,6 +171,7 @@ async function enterRoom(roomId) {
   $("setupScreen").classList.remove("active");
   $("mainScreen").classList.add("active");
   $("roomIdDisplay").textContent = roomId;
+  updateSyncStatus();
   const chatArea = $("chatArea");
   if (chatArea) chatArea.style.display = "flex";
   await pollFiles();
@@ -198,6 +220,10 @@ async function handleFiles(files) {
     showToast("先にルームへ参加してください", "error");
     return;
   }
+  if (!hasSyncBackend()) {
+    showSyncSetupError();
+    return;
+  }
 
   const validFiles = files.filter(file => {
     if (file.size > MAX_FILE_SIZE) {
@@ -208,7 +234,13 @@ async function handleFiles(files) {
   });
 
   for (const file of validFiles) {
-    await saveRoomFile(currentRoomId, file);
+    try {
+      await saveRoomFile(currentRoomId, file);
+    } catch (error) {
+      console.error("ファイル保存エラー:", error);
+      showToast("同期サーバーへ保存できませんでした", "error");
+      return;
+    }
   }
 
   $("fileInput").value = "";
@@ -217,6 +249,8 @@ async function handleFiles(files) {
 }
 
 async function listRoomFiles(roomId) {
+  if (!hasSyncBackend()) return [];
+
   if (API_URL) {
     try {
       const files = await apiRequest({
@@ -228,13 +262,16 @@ async function listRoomFiles(roomId) {
       });
       if (Array.isArray(files)) return files;
     } catch (error) {
-      console.warn("APIファイル取得に失敗。ローカル保存に切り替えます。", error);
+      console.warn("APIファイル取得に失敗しました。", error);
+      showToast("同期サーバーから取得できませんでした", "error");
     }
   }
-  return readLocalFiles(roomId);
+  return [];
 }
 
 async function saveRoomFile(roomId, file) {
+  if (!hasSyncBackend()) throw new Error("Sync backend is not configured");
+
   const fileRecord = {
     id: crypto.randomUUID(),
     room_id: roomId,
@@ -251,22 +288,19 @@ async function saveRoomFile(roomId, file) {
       await apiRequest({ table: "files", action: "insert", data: fileRecord });
       return;
     } catch (error) {
-      console.warn("API保存に失敗。ローカル保存に切り替えます。", error);
-      showToast("API保存に失敗したため、この端末内に保存しました", "error");
+      console.warn("API保存に失敗しました。", error);
+      throw error;
     }
   }
-
-  const files = await readLocalFiles(roomId);
-  files.unshift(fileRecord);
-  localStorage.setItem(localFileKey(roomId), JSON.stringify(files.slice(0, 80)));
 }
 
 async function clearAllFiles() {
   if (!currentRoomId || !confirm("このルームのファイル一覧を削除しますか？")) return;
-  if (API_URL) {
-    showToast("API側の一括削除はバックエンド実装に依存します", "info");
+  if (!hasSyncBackend()) {
+    showSyncSetupError();
+    return;
   }
-  localStorage.removeItem(localFileKey(currentRoomId));
+  showToast("一括削除はバックエンド側のdelete対応後に有効化します", "info");
   await pollFiles();
 }
 
@@ -367,6 +401,10 @@ async function sendChatMessage() {
   const input = $("chatInput");
   const msg = input.value.trim();
   if (!msg || !currentRoomId) return;
+  if (!hasSyncBackend()) {
+    showSyncSetupError();
+    return;
+  }
 
   const record = {
     id: crypto.randomUUID(),
@@ -377,13 +415,7 @@ async function sendChatMessage() {
   };
 
   try {
-    if (API_URL) {
-      await apiRequest({ table: "chat_messages", action: "insert", data: record });
-    } else {
-      const messages = readLocalMessages(currentRoomId);
-      messages.push(record);
-      localStorage.setItem(localChatKey(currentRoomId), JSON.stringify(messages.slice(-200)));
-    }
+    await apiRequest({ table: "chat_messages", action: "insert", data: record });
     input.value = "";
     await renderChatMessages();
   } catch (error) {
@@ -398,6 +430,10 @@ async function renderChatMessages() {
   if (!container) return;
 
   try {
+    if (!hasSyncBackend()) {
+      container.innerHTML = "";
+      return;
+    }
     const messages = API_URL
       ? await apiRequest({
           table: "chat_messages",
@@ -406,7 +442,7 @@ async function renderChatMessages() {
           limit: 200,
           sort: "created_at ASC"
         })
-      : readLocalMessages(currentRoomId);
+      : [];
 
     container.innerHTML = messages.map(message => {
       const isOwn = message.sender === (IS_IOS ? "Mobile" : "Desktop");
@@ -434,6 +470,8 @@ function localChatKey(roomId) {
 }
 
 async function apiRequest(payload) {
+  if (!API_URL) throw new Error("API_URL is not configured");
+
   const response = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -587,6 +625,7 @@ function roomUrl(roomId) {
   const url = new URL(location.href);
   url.search = "";
   url.searchParams.set("room", roomId);
+  if (API_URL && !window.AIRSHARE_API_URL) url.searchParams.set("api", API_URL);
   return url.toString();
 }
 
@@ -622,6 +661,34 @@ function showJoinError(message) {
   const error = $("joinError");
   error.textContent = message;
   error.style.display = "block";
+}
+
+function updateSyncStatus() {
+  let status = $("syncStatus");
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "syncStatus";
+    status.className = "sync-status";
+  }
+  const target = document.querySelector(".screen.active") || $("setupScreen") || $("mainScreen");
+  if (target && status.parentElement !== target) target.prepend(status);
+
+  if (hasSyncBackend()) {
+    status.className = "sync-status connected";
+    status.innerHTML = `<i class="fa-solid fa-cloud"></i><span>同期サーバー接続中</span>`;
+    return;
+  }
+
+  status.className = "sync-status disconnected";
+  status.innerHTML = `
+    <i class="fa-solid fa-triangle-exclamation"></i>
+    <span>同期サーバー未設定: この状態では別端末とのファイル共有・チャットは反映されません。</span>
+  `;
+}
+
+function showSyncSetupError() {
+  updateSyncStatus();
+  showToast("同期サーバー未設定です。GitHub Pagesだけでは端末間同期できません。", "error");
 }
 
 function hideJoinError() {
