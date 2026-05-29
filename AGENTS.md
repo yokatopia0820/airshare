@@ -10,10 +10,11 @@ Use these as reference sources, but keep this file adapted to the current projec
 
 ## Project Overview
 
-- AirShare is a static web app for AirDrop-style file sharing UI between iPhone and Windows.
+- AirShare is a local Wi-Fi file sharing app for AirDrop-style sharing between iPhone and Windows.
 - Entry point: `index.html`.
 - Frontend assets: `css/style.css` and `js/app.js`.
 - Optional backend reference: `worker/worker.js` and `worker/schema.sql` for Cloudflare Workers + D1.
+- Runtime server: `airshare-server.js`.
 - No package manager scripts are required.
 
 ## Working Agreements
@@ -47,8 +48,8 @@ Use these as reference sources, but keep this file adapted to the current projec
 
 ## Build And Run
 
-- Build: none; this is a static app.
-- Dev server: `node dev-server.js`, then open `http://127.0.0.1:4173/index.html`.
+- Build: none.
+- Dev server / app server: `node airshare-server.js`, then open `http://127.0.0.1:4173/index.html`.
 - Static HTML fallback: `python -m http.server 4173`, `py -m http.server 4173`, or a known local Python path, then open `http://localhost:4173/index.html`.
 - Do not add npm, pnpm, Vite, or other tooling unless the user asks or the project clearly adopts it.
 - If package scripts are added later, document the exact build, lint, test, and dev-server commands here.

@@ -1,4 +1,10 @@
 server.err.log
 server.out.log
+*.pid
+wrangler-login.out
+wrangler-login.err
+sub.out
+node_modules/
+package-lock.json
 .DS_Store
 Thumbs.db

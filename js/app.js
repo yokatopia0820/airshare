@@ -1,44 +1,39 @@
-const API_URL = getConfiguredApiUrl();
+const API_URL = getApiUrl();
+const PUBLIC_BASE_URL = getPublicBaseUrl();
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
-const POLL_INTERVAL_MS = 4000;
+const POLL_INTERVAL_MS = 1500;
 
 let currentRoomId = "";
 let currentFiles = [];
+let currentMessages = [];
 let selectedFile = null;
 let pollTimer = null;
 let scanStream = null;
 let scanFrameId = null;
+let apiOnline = false;
 
 const $ = id => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", init);
 
-function getConfiguredApiUrl() {
-  const params = new URLSearchParams(window.location.search);
-  return (
-    window.AIRSHARE_API_URL ||
-    params.get("api") ||
-    localStorage.getItem("airshare_api_url") ||
-    ""
-  ).trim().replace(/\/$/, "");
-}
-
-function persistApiUrlFromQuery() {
-  if (!API_URL) return;
-  localStorage.setItem("airshare_api_url", API_URL);
-}
-
-function hasSyncBackend() {
-  return Boolean(API_URL);
-}
-
-function init() {
-  persistApiUrlFromQuery();
+async function init() {
   restoreTheme();
   bindEvents();
+  await checkApi();
   applyRoomFromUrl();
   updateSyncStatus();
+}
+
+function getApiUrl() {
+  const configured = window.AIRSHARE_API_URL || localStorage.getItem("airshare_api_url") || "";
+  if (configured) return configured.replace(/\/$/, "");
+  if (location.protocol.startsWith("http")) return `${location.origin}/api`;
+  return "";
+}
+
+function getPublicBaseUrl() {
+  return window.AIRSHARE_PUBLIC_BASE_URL || `${location.origin}${location.pathname}`;
 }
 
 function bindEvents() {
@@ -60,7 +55,7 @@ function bindEvents() {
   $("btnHeaderShowQR")?.addEventListener("click", showRoomQr);
   $("btnHeaderCopyRoom")?.addEventListener("click", () => copyRoomId(currentRoomId));
   $("btnLeaveRoom")?.addEventListener("click", leaveRoom);
-  $("btnRefresh")?.addEventListener("click", pollFiles);
+  $("btnRefresh")?.addEventListener("click", pollRoom);
   $("btnClearAll")?.addEventListener("click", clearAllFiles);
   $("btnCloseQR")?.addEventListener("click", () => closeModal("qrModal"));
   $("btnCopyFromQR")?.addEventListener("click", () => copyRoomId(currentRoomId));
@@ -79,8 +74,7 @@ function bindEvents() {
     }
   });
 
-  const fileInput = $("fileInput");
-  fileInput?.addEventListener("change", event => handleFiles([...event.target.files]));
+  $("fileInput")?.addEventListener("change", event => handleFiles([...event.target.files]));
 
   const dropZone = $("dropZone");
   if (dropZone) {
@@ -104,6 +98,22 @@ function bindEvents() {
       if (event.target === modal) modal.style.display = "none";
     });
   });
+}
+
+async function checkApi() {
+  if (!API_URL) {
+    apiOnline = false;
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/health`, { cache: "no-store" });
+    apiOnline = response.ok;
+    return apiOnline;
+  } catch {
+    apiOnline = false;
+    return false;
+  }
 }
 
 function restoreTheme() {
@@ -136,10 +146,9 @@ function applyRoomFromUrl() {
 
 async function createRoom() {
   playClick();
-  currentRoomId = generateRoomId();
-  await enterRoom(currentRoomId);
+  const roomId = generateRoomId();
+  await joinRoom(roomId);
   showRoomQr();
-  showToast("ルームに入りました", "success");
 }
 
 function cancelRoomCreation() {
@@ -164,15 +173,20 @@ async function joinRoom(roomId) {
 }
 
 async function enterRoom(roomId) {
+  await ensureApiOnline();
+  await apiRequest(`/rooms/${encodeURIComponent(roomId)}`, { method: "POST" });
+
   $("setupScreen").classList.remove("active");
   $("mainScreen").classList.add("active");
   $("roomIdDisplay").textContent = roomId;
-  updateSyncStatus();
   const chatArea = $("chatArea");
   if (chatArea) chatArea.style.display = "flex";
-  await pollFiles();
+
+  updateSyncStatus();
+  await pollRoom();
   startPolling();
   history.replaceState(null, "", `${location.pathname}?room=${encodeURIComponent(roomId)}`);
+  showToast("ルームに入りました", "success");
 }
 
 function leaveRoom() {
@@ -180,6 +194,7 @@ function leaveRoom() {
   stopPolling();
   currentRoomId = "";
   currentFiles = [];
+  currentMessages = [];
   selectedFile = null;
   $("mainScreen").classList.remove("active");
   $("setupScreen").classList.add("active");
@@ -192,11 +207,12 @@ function leaveRoom() {
   if (chatMessages) chatMessages.innerHTML = "";
   if (chatInput) chatInput.value = "";
   history.replaceState(null, "", location.pathname);
+  updateSyncStatus();
 }
 
 function startPolling() {
   stopPolling();
-  pollTimer = setInterval(pollFiles, POLL_INTERVAL_MS);
+  pollTimer = setInterval(pollRoom, POLL_INTERVAL_MS);
 }
 
 function stopPolling() {
@@ -204,11 +220,28 @@ function stopPolling() {
   pollTimer = null;
 }
 
-async function pollFiles() {
-  if (!currentRoomId) return;
-  currentFiles = await listRoomFiles(currentRoomId);
-  renderFileList();
-  await renderChatMessages();
+async function pollRoom() {
+  if (!currentRoomId || !apiOnline) return;
+  try {
+    const [files, messages] = await Promise.all([
+      apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/files`),
+      apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/messages`)
+    ]);
+    currentFiles = Array.isArray(files) ? files : [];
+    currentMessages = Array.isArray(messages) ? messages : [];
+    renderFileList();
+    await renderChatMessages();
+  } catch (error) {
+    console.error("同期エラー:", error);
+    apiOnline = false;
+    updateSyncStatus();
+  }
+}
+
+async function ensureApiOnline() {
+  if (apiOnline || await checkApi()) return;
+  updateSyncStatus();
+  throw new Error("AirShare server is not running");
 }
 
 async function handleFiles(files) {
@@ -216,8 +249,11 @@ async function handleFiles(files) {
     showToast("先にルームへ参加してください", "error");
     return;
   }
-  if (!hasSyncBackend()) {
-    showSyncSetupError();
+
+  try {
+    await ensureApiOnline();
+  } catch {
+    showToast("Windows側でAirShareサーバーを起動してください。", "error");
     return;
   }
 
@@ -230,47 +266,17 @@ async function handleFiles(files) {
   });
 
   for (const file of validFiles) {
-    try {
-      await saveRoomFile(currentRoomId, file);
-    } catch (error) {
-      console.error("ファイル保存エラー:", error);
-      showToast("同期サーバーへ保存できませんでした", "error");
-      return;
-    }
+    await uploadFile(file);
   }
 
   $("fileInput").value = "";
-  await pollFiles();
-  if (validFiles.length) showToast(`${validFiles.length}件のファイルを追加しました`, "success");
+  await pollRoom();
+  if (validFiles.length) showToast(`${validFiles.length}件のファイルを共有しました`, "success");
 }
 
-async function listRoomFiles(roomId) {
-  if (!hasSyncBackend()) return [];
-
-  if (API_URL) {
-    try {
-      const files = await apiRequest({
-        table: "files",
-        action: "query",
-        filters: { room_id: roomId },
-        limit: 200,
-        sort: "created_at DESC"
-      });
-      if (Array.isArray(files)) return files;
-    } catch (error) {
-      console.warn("APIファイル取得に失敗しました。", error);
-      showToast("同期サーバーから取得できませんでした", "error");
-    }
-  }
-  return [];
-}
-
-async function saveRoomFile(roomId, file) {
-  if (!hasSyncBackend()) throw new Error("Sync backend is not configured");
-
-  const fileRecord = {
-    id: crypto.randomUUID(),
-    room_id: roomId,
+async function uploadFile(file) {
+  const payload = {
+    id: cryptoRandomId(),
     name: file.name,
     type: file.type || "application/octet-stream",
     size: file.size,
@@ -278,38 +284,16 @@ async function saveRoomFile(roomId, file) {
     sender: IS_IOS ? "Mobile" : "Desktop",
     created_at: new Date().toISOString()
   };
-
-  if (API_URL) {
-    try {
-      await apiRequest({ table: "files", action: "insert", data: fileRecord });
-      return;
-    } catch (error) {
-      console.warn("API保存に失敗しました。", error);
-      throw error;
-    }
-  }
+  await apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/files`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 async function clearAllFiles() {
   if (!currentRoomId || !confirm("このルームのファイル一覧を削除しますか？")) return;
-  if (!hasSyncBackend()) {
-    showSyncSetupError();
-    return;
-  }
-  showToast("一括削除はバックエンド側のdelete対応後に有効化します", "info");
-  await pollFiles();
-}
-
-async function readLocalFiles(roomId) {
-  try {
-    return JSON.parse(localStorage.getItem(localFileKey(roomId)) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function localFileKey(roomId) {
-  return `airshare_files_${roomId}`;
+  await apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/files`, { method: "DELETE" });
+  await pollRoom();
 }
 
 function renderFileList() {
@@ -397,23 +381,20 @@ async function sendChatMessage() {
   const input = $("chatInput");
   const msg = input.value.trim();
   if (!msg || !currentRoomId) return;
-  if (!hasSyncBackend()) {
-    showSyncSetupError();
-    return;
-  }
-
-  const record = {
-    id: crypto.randomUUID(),
-    room_id: currentRoomId,
-    sender: IS_IOS ? "Mobile" : "Desktop",
-    message: msg,
-    created_at: new Date().toISOString()
-  };
 
   try {
-    await apiRequest({ table: "chat_messages", action: "insert", data: record });
+    await ensureApiOnline();
+    await apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({
+        id: cryptoRandomId(),
+        sender: IS_IOS ? "Mobile" : "Desktop",
+        message: msg,
+        created_at: new Date().toISOString()
+      })
+    });
     input.value = "";
-    await renderChatMessages();
+    await pollRoom();
   } catch (error) {
     console.error("チャット送信エラー:", error);
     showToast("メッセージを送信できませんでした", "error");
@@ -421,57 +402,25 @@ async function sendChatMessage() {
 }
 
 async function renderChatMessages() {
-  if (!currentRoomId) return;
   const container = $("chatMessages");
   if (!container) return;
 
-  try {
-    if (!hasSyncBackend()) {
-      container.innerHTML = "";
-      return;
-    }
-    const messages = API_URL
-      ? await apiRequest({
-          table: "chat_messages",
-          action: "query",
-          filters: { room_id: currentRoomId },
-          limit: 200,
-          sort: "created_at ASC"
-        })
-      : [];
+  container.innerHTML = currentMessages.map(message => {
+    const isOwn = message.sender === (IS_IOS ? "Mobile" : "Desktop");
+    return `<div class="chat-msg ${isOwn ? "self" : "other"}">${escapeHtml(message.message)}</div>`;
+  }).join("");
 
-    container.innerHTML = messages.map(message => {
-      const isOwn = message.sender === (IS_IOS ? "Mobile" : "Desktop");
-      return `<div class="chat-msg ${isOwn ? "self" : "other"}">${escapeHtml(message.message)}</div>`;
-    }).join("");
-
-    requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-    });
-  } catch (error) {
-    console.error("チャット取得エラー:", error);
-  }
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
-function readLocalMessages(roomId) {
-  try {
-    return JSON.parse(localStorage.getItem(localChatKey(roomId)) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function localChatKey(roomId) {
-  return `airshare_chat_${roomId}`;
-}
-
-async function apiRequest(payload) {
-  if (!API_URL) throw new Error("API_URL is not configured");
-
-  const response = await fetch(API_URL, {
-    method: "POST",
+async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: options.method || "GET",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    cache: "no-store",
+    body: options.body
   });
   if (!response.ok) throw new Error(`API error: ${response.status}`);
   return response.json();
@@ -613,15 +562,13 @@ function drawQr(canvasId, text) {
   ctx.fillStyle = "#111";
   ctx.font = "14px sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("QR library loading...", 110, 104);
-  ctx.fillText(currentRoomId, 110, 126);
+  ctx.fillText(currentRoomId, 110, 112);
 }
 
 function roomUrl(roomId) {
-  const url = new URL(location.href);
+  const url = new URL(PUBLIC_BASE_URL);
   url.search = "";
   url.searchParams.set("room", roomId);
-  if (API_URL && !window.AIRSHARE_API_URL) url.searchParams.set("api", API_URL);
   return url.toString();
 }
 
@@ -635,8 +582,7 @@ function extractRoomId(value) {
 }
 
 function formatRoomInput(event) {
-  const input = event.target;
-  input.value = normalizeRoomId(input.value);
+  event.target.value = normalizeRoomId(event.target.value);
 }
 
 function normalizeRoomId(value) {
@@ -653,12 +599,6 @@ function generateRoomId() {
   return `${chars.slice(0, 3).join("")}-${chars.slice(3).join("")}`;
 }
 
-function showJoinError(message) {
-  const error = $("joinError");
-  error.textContent = message;
-  error.style.display = "block";
-}
-
 function updateSyncStatus() {
   let status = $("syncStatus");
   if (!status) {
@@ -666,7 +606,6 @@ function updateSyncStatus() {
     status.id = "syncStatus";
     status.className = "sync-status";
   }
-
   const setupCard = document.querySelector("#setupScreen.active .setup-card");
   const mainScreen = $("mainScreen");
   const target = setupCard || (mainScreen?.classList.contains("active") ? mainScreen : null);
@@ -679,22 +618,20 @@ function updateSyncStatus() {
     }
   }
 
-  if (hasSyncBackend()) {
+  if (apiOnline) {
     status.className = "sync-status connected";
-    status.innerHTML = `<i class="fa-solid fa-cloud"></i><span>同期サーバー接続中</span>`;
+    status.innerHTML = `<i class="fa-solid fa-circle-check"></i><span>AirShareサーバー接続中。同じWi-Fiの端末と共有できます。</span>`;
     return;
   }
 
   status.className = "sync-status disconnected";
-  status.innerHTML = `
-    <i class="fa-solid fa-triangle-exclamation"></i>
-    <span>同期サーバー未設定: この状態では別端末とのファイル共有・チャットは反映されません。</span>
-  `;
+  status.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>Windows側でAirShareサーバーを起動してください。</span>`;
 }
 
-function showSyncSetupError() {
-  updateSyncStatus();
-  showToast("同期サーバー未設定です。GitHub Pagesだけでは端末間同期できません。", "error");
+function showJoinError(message) {
+  const error = $("joinError");
+  error.textContent = message;
+  error.style.display = "block";
 }
 
 function hideJoinError() {
@@ -722,8 +659,7 @@ function showToast(message, type = "info") {
 }
 
 function playClick() {
-  if (!navigator.vibrate) return;
-  navigator.vibrate(10);
+  if (navigator.vibrate) navigator.vibrate(10);
 }
 
 function fileToDataUrl(file) {
@@ -770,4 +706,9 @@ function escapeHtml(text) {
 
 function escapeAttr(text) {
   return escapeHtml(text).replace(/`/g, "&#096;");
+}
+
+function cryptoRandomId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
