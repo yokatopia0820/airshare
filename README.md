@@ -1,19 +1,13 @@
 # AirShare
 
-iPhone と Windows 11 の間で、同じ Wi-Fi 内から QR 参加してファイルとメッセージを共有する Web アプリです。
+AirShare は、iPhone と Windows の間でファイルとメッセージを共有するブラウザアプリです。
 
-## いまの実装方針
+動作方式は 2 つあります。
 
-AirShare は Windows 側で小さなローカルサーバーを起動し、スマートフォンが QR コードからそのサーバーへアクセスする方式です。
+- ローカル Wi-Fi 版: Windows 側で `airshare-server.js` を起動し、同じ Wi-Fi 内の端末で共有する
+- インターネット版: Cloudflare Worker バックエンドを公開し、離れた場所の端末同士で共有する
 
-この方式にした理由:
-
-- GitHub Pages だけでは端末間の状態共有ができない
-- QR コードだけでは通信路そのものにはならない
-- Cloudflare / Firebase などの外部ログインや課金設定なしで動かせる
-- 同じ Wi-Fi 内なら、Windows とスマートフォン間で最短に動作確認できる
-
-## 起動方法
+## ローカル Wi-Fi 版
 
 Windows 側でこのフォルダを開き、以下を実行します。
 
@@ -21,39 +15,95 @@ Windows 側でこのフォルダを開き、以下を実行します。
 node airshare-server.js
 ```
 
-起動すると、次のようなURLが表示されます。
+起動すると、次のような URL が表示されます。
 
 ```text
 AirShare local: http://127.0.0.1:4173/index.html
 AirShare phone: http://192.168.x.x:4173/index.html
 ```
 
-Windowsでは `AirShare local` を開きます。スマートフォンは、アプリ内のQRコード、または `AirShare phone` のURLから参加します。
+Windows では `AirShare local` を開きます。スマートフォンは、アプリ内の QR コード、または `AirShare phone` の URL から参加します。
 
-## 使い方
+## インターネット版
 
-1. Windows 側で `node airshare-server.js` を起動
-2. Windows ブラウザで `http://127.0.0.1:4173/index.html` を開く
-3. 「QRコードを発行する」を押す
-4. スマートフォンでQRコードを読み取る
-5. 同じルームに入ったら、ファイルやメッセージを共有する
+インターネット版では以下を使います。
+
+- GitHub Pages: 静的フロントエンド
+- Cloudflare Workers: 公開 API
+- Cloudflare D1: ルーム、チャット、参加者、ファイル情報
+- Cloudflare R2: ファイル本体
+
+これにより、同じ Wi-Fi にいない端末同士でも、QR コードやリンクから同じルームへ参加できます。
+
+### 1. Cloudflare リソースを作成
+
+Wrangler を使って D1 データベースと R2 バケットを作成します。
+
+```powershell
+npx wrangler d1 create airshare
+npx wrangler r2 bucket create airshare-files
+```
+
+`worker/wrangler.example.toml` を `worker/wrangler.toml` にコピーし、作成時に表示された D1 の `database_id` を入れます。
+
+```toml
+name = "airshare-api"
+main = "worker.js"
+compatibility_date = "2026-05-28"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "airshare"
+database_id = "replace-with-your-d1-database-id"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "airshare-files"
+```
+
+テーブルを作成します。
+
+```powershell
+npx wrangler d1 execute airshare --remote --file worker/schema.sql
+```
+
+Worker をデプロイします。
+
+```powershell
+cd worker
+npx wrangler deploy
+```
+
+### 2. フロントエンドを Worker に接続
+
+`js/config.js` を編集し、デプロイした Worker の URL を設定します。
+
+```js
+window.AIRSHARE_API_URL = "https://airshare-api.your-subdomain.workers.dev";
+```
+
+その後、変更を commit / push すると GitHub Pages 側から公開 API に接続できます。
+
+## 現在の制限
+
+- ファイル上限は 1 ファイル 50MB です。
+- ルームはルーム ID を知っている人が参加できる簡易共有スペースです。
+- 参加者表示は約 15 秒間通信がないと非アクティブ扱いになります。
+- ファイルとメッセージは、ルームに再アクセスされたタイミングで約 24 時間後に削除対象になります。
 
 ## 注意
 
-- Windows とスマートフォンは同じ Wi-Fi に接続してください。
-- Windows Defender ファイアウォールで Node.js の通信許可が必要な場合があります。
-- 現在のファイル保存はメモリ上です。サーバーを終了すると共有中のファイルとメッセージは消えます。
-- 50MBまでのファイルを想定しています。
+- QR コード自体がファイルを送っているわけではありません。QR はルーム URL を渡すためのものです。
+- 離れた場所の端末同士で共有するには、必ず公開された中継バックエンドが必要です。このプロジェクトでは Cloudflare Worker がその役割です。
+- `worker/wrangler.toml` には Cloudflare アカウント固有の ID が入るため、公開したくない場合は commit しないでください。
 
 ## 構成
 
 - `index.html`: アプリ本体
 - `css/style.css`: UI
-- `js/app.js`: ルーム、ファイル、チャット同期
-- `airshare-server.js`: Windows側で起動するローカル共有サーバー
-- `vendor/jsQR.js`: QR読み取り
-- `vendor/qrcode.js`: QR生成
-
-## 公開ページについて
-
-GitHub Pages のURLはデモ表示用です。実際に端末間共有をする場合は、Windows側で `airshare-server.js` を起動して使います。
+- `js/app.js`: ルーム、ファイル、チャット、QR、同期処理
+- `airshare-server.js`: ローカル Wi-Fi 版サーバー
+- `worker/worker.js`: Cloudflare Workers 用の公開 API
+- `worker/schema.sql`: D1 データベース定義
+- `vendor/jsQR.js`: QR 読み取り
+- `vendor/qrcode.js`: QR 生成

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS files (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   size INTEGER NOT NULL,
-  data_url TEXT NOT NULL,
+  object_key TEXT NOT NULL,
   sender TEXT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -20,3 +20,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages(room_id);
+
+CREATE TABLE IF NOT EXISTS room_clients (
+  room_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  sender TEXT NOT NULL,
+  last_seen INTEGER NOT NULL,
+  PRIMARY KEY (room_id, client_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_clients_last_seen ON room_clients(last_seen);

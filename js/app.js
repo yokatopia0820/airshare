@@ -366,7 +366,10 @@ function renderFileList() {
 }
 
 function thumbnailHtml(file) {
-  if (file.type?.startsWith("image/")) return `<img src="${escapeAttr(file.data_url)}" alt="">`;
+  if (file.type?.startsWith("image/")) {
+    const source = file.data_url || file.content_url;
+    if (source) return `<img src="${escapeAttr(source)}" alt="">`;
+  }
   if (file.type?.startsWith("video/")) return `<i class="fa-solid fa-file-video"></i>`;
   if (file.type?.startsWith("audio/")) return `<i class="fa-solid fa-file-audio"></i>`;
   if (file.type?.includes("pdf")) return `<i class="fa-solid fa-file-pdf"></i>`;
@@ -377,14 +380,15 @@ function thumbnailHtml(file) {
 async function previewFile(file) {
   selectedFile = file;
   const content = $("previewContent");
+  const source = await fileSource(file);
   if (file.type?.startsWith("image/")) {
-    content.innerHTML = `<img src="${escapeAttr(file.data_url)}" alt="${escapeAttr(file.name)}">`;
+    content.innerHTML = `<img src="${escapeAttr(source)}" alt="${escapeAttr(file.name)}">`;
   } else if (file.type?.startsWith("video/")) {
-    content.innerHTML = `<video src="${escapeAttr(file.data_url)}" controls></video>`;
+    content.innerHTML = `<video src="${escapeAttr(source)}" controls></video>`;
   } else if (file.type?.startsWith("audio/")) {
-    content.innerHTML = `<audio src="${escapeAttr(file.data_url)}" controls></audio>`;
+    content.innerHTML = `<audio src="${escapeAttr(source)}" controls></audio>`;
   } else if (file.type?.startsWith("text/") || /\.(txt|md|csv|json|log)$/i.test(file.name)) {
-    content.innerHTML = `<pre>${escapeHtml(await dataUrlToText(file.data_url))}</pre>`;
+    content.innerHTML = `<pre>${escapeHtml(await fileToText(file))}</pre>`;
   } else {
     content.innerHTML = `<div><i class="fa-solid fa-file" style="font-size:3rem;color:var(--accent)"></i><p>${escapeHtml(file.name)}</p></div>`;
   }
@@ -402,7 +406,11 @@ function downloadSelectedFile() {
 
 function downloadFile(file) {
   const link = document.createElement("a");
-  link.href = file.data_url;
+  link.href = file.data_url || file.content_url;
+  if (!link.href) {
+    showToast("ダウンロードURLが見つかりませんでした", "error");
+    return;
+  }
   link.download = file.name;
   document.body.appendChild(link);
   link.click();
@@ -737,6 +745,20 @@ function fileToDataUrl(file) {
 
 async function dataUrlToText(dataUrl) {
   const response = await fetch(dataUrl);
+  return response.text();
+}
+
+async function fileSource(file) {
+  if (file.data_url) return file.data_url;
+  if (file.content_url) return file.content_url;
+  throw new Error("File source is missing");
+}
+
+async function fileToText(file) {
+  if (file.data_url) return dataUrlToText(file.data_url);
+  if (!file.content_url) return "";
+  const response = await fetch(file.content_url);
+  if (!response.ok) throw new Error("File text fetch failed");
   return response.text();
 }
 

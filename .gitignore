@@ -6,5 +6,6 @@ wrangler-login.err
 sub.out
 node_modules/
 package-lock.json
+worker/wrangler.toml
 .DS_Store
 Thumbs.db
