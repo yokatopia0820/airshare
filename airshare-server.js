@@ -7,6 +7,7 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = "0.0.0.0";
 const ROOT = process.cwd();
 const MAX_BODY_BYTES = 75 * 1024 * 1024;
+const CLIENT_TTL_MS = 15 * 1000;
 
 const rooms = new Map();
 
@@ -67,8 +68,15 @@ async function handleApi(request, response, url) {
   const resource = match[2];
   const room = getRoom(roomId);
 
+  if (!resource && request.method === "GET") {
+    sendJson(response, roomStatus(roomId, room));
+    return;
+  }
+
   if (!resource && request.method === "POST") {
-    sendJson(response, { ok: true, roomId });
+    const body = await readJson(request);
+    touchClient(room, body);
+    sendJson(response, { ok: true, ...roomStatus(roomId, room) });
     return;
   }
 
@@ -128,9 +136,41 @@ async function handleApi(request, response, url) {
 
 function getRoom(roomId) {
   if (!rooms.has(roomId)) {
-    rooms.set(roomId, { files: [], messages: [], updatedAt: Date.now() });
+    rooms.set(roomId, { files: [], messages: [], clients: new Map(), updatedAt: Date.now() });
   }
   return rooms.get(roomId);
+}
+
+function touchClient(room, body = {}) {
+  const clientId = String(body.client_id || "").slice(0, 80);
+  if (!clientId) return;
+  room.clients.set(clientId, {
+    id: clientId,
+    name: String(body.sender || "Device").slice(0, 40),
+    lastSeen: Date.now()
+  });
+}
+
+function activeClients(room) {
+  const now = Date.now();
+  for (const [id, client] of room.clients.entries()) {
+    if (now - client.lastSeen > CLIENT_TTL_MS) room.clients.delete(id);
+  }
+  return [...room.clients.values()];
+}
+
+function roomStatus(roomId, room) {
+  const clients = activeClients(room);
+  return {
+    roomId,
+    clientCount: clients.length,
+    clients: clients.map(client => ({
+      id: client.id,
+      name: client.name,
+      lastSeen: client.lastSeen
+    })),
+    updatedAt: room.updatedAt
+  };
 }
 
 function normalizeRoomId(value) {

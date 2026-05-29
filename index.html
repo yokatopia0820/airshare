@@ -308,13 +308,16 @@
     <div class="drop-zone" id="dropZone">
       <div class="drop-zone-inner">
         <div class="drop-hint" id="dropHint">
-          <p class="drop-title">ファイルをドラッグ&ドロップ</p>
-          <p class="drop-sub">または</p>
+          <div class="upload-visual" aria-hidden="true">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+          </div>
+          <p class="drop-title">ここにファイルをドロップ</p>
+          <p class="drop-sub">写真・動画・PDFなどをまとめて共有できます</p>
           <label for="fileInput" id="fileInputLabel" class="file-select-link">
             <i class="fa-solid fa-folder-open"></i> ファイルを選択
           </label>
           <input type="file" id="fileInput" multiple>
-          <p class="drop-hint">最大50MBまで、複数ファイル対応</p>
+          <p class="drop-limit">最大50MB / 複数ファイル対応</p>
         </div>
       </div>
     </div>
@@ -405,8 +408,8 @@
   <!-- トーストコンテナ -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="js/runtime-config.js?v=20260529-1"></script>
-  <script src="js/config.js?v=20260529-1"></script>
-  <script src="js/app.js?v=20260529-1"></script>
+  <script src="js/runtime-config.js?v=20260529-2"></script>
+  <script src="js/config.js?v=20260529-2"></script>
+  <script src="js/app.js?v=20260529-2"></script>
 </body>
 </html>

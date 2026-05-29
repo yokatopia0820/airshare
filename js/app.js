@@ -3,6 +3,7 @@ const PUBLIC_BASE_URL = getPublicBaseUrl();
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const POLL_INTERVAL_MS = 1500;
+const CLIENT_ID = getClientId();
 
 let currentRoomId = "";
 let currentFiles = [];
@@ -12,6 +13,8 @@ let pollTimer = null;
 let scanStream = null;
 let scanFrameId = null;
 let apiOnline = false;
+let isRoomCreator = false;
+let lastClientCount = 0;
 
 const $ = id => document.getElementById(id);
 
@@ -135,10 +138,19 @@ function updateThemeIcon(theme) {
   icon.className = theme === "dark" ? "fa-solid fa-sun" : "fa-solid fa-moon";
 }
 
+function getClientId() {
+  return cryptoRandomId();
+}
+
+function deviceName() {
+  return IS_IOS ? "Mobile" : "Desktop";
+}
+
 function applyRoomFromUrl() {
   const params = new URLSearchParams(location.search);
   const room = normalizeRoomId(params.get("room") || "");
   if (room) {
+    isRoomCreator = false;
     $("roomInput").value = room;
     joinRoom(room);
   }
@@ -147,12 +159,15 @@ function applyRoomFromUrl() {
 async function createRoom() {
   playClick();
   const roomId = generateRoomId();
+  isRoomCreator = true;
   await joinRoom(roomId);
   showRoomQr();
 }
 
 function cancelRoomCreation() {
   currentRoomId = "";
+  isRoomCreator = false;
+  lastClientCount = 0;
   $("setupQrArea").style.display = "none";
 }
 
@@ -163,6 +178,7 @@ function joinFromInput() {
     showJoinError("ルームIDを入力してください。");
     return;
   }
+  isRoomCreator = false;
   joinRoom(roomId);
 }
 
@@ -174,7 +190,7 @@ async function joinRoom(roomId) {
 
 async function enterRoom(roomId) {
   await ensureApiOnline();
-  await apiRequest(`/rooms/${encodeURIComponent(roomId)}`, { method: "POST" });
+  await touchRoom(roomId);
 
   $("setupScreen").classList.remove("active");
   $("mainScreen").classList.add("active");
@@ -195,6 +211,8 @@ function leaveRoom() {
   currentRoomId = "";
   currentFiles = [];
   currentMessages = [];
+  isRoomCreator = false;
+  lastClientCount = 0;
   selectedFile = null;
   $("mainScreen").classList.remove("active");
   $("setupScreen").classList.add("active");
@@ -223,19 +241,33 @@ function stopPolling() {
 async function pollRoom() {
   if (!currentRoomId || !apiOnline) return;
   try {
-    const [files, messages] = await Promise.all([
+    const [status, files, messages] = await Promise.all([
+      touchRoom(currentRoomId),
       apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/files`),
       apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/messages`)
     ]);
+    lastClientCount = Number(status?.clientCount || 0);
     currentFiles = Array.isArray(files) ? files : [];
     currentMessages = Array.isArray(messages) ? messages : [];
     renderFileList();
     await renderChatMessages();
+    handlePeerJoined();
+    updateSyncStatus();
   } catch (error) {
     console.error("同期エラー:", error);
     apiOnline = false;
     updateSyncStatus();
   }
+}
+
+async function touchRoom(roomId) {
+  return apiRequest(`/rooms/${encodeURIComponent(roomId)}`, {
+    method: "POST",
+    body: JSON.stringify({
+      client_id: CLIENT_ID,
+      sender: deviceName()
+    })
+  });
 }
 
 async function ensureApiOnline() {
@@ -281,7 +313,7 @@ async function uploadFile(file) {
     type: file.type || "application/octet-stream",
     size: file.size,
     data_url: await fileToDataUrl(file),
-    sender: IS_IOS ? "Mobile" : "Desktop",
+    sender: deviceName(),
     created_at: new Date().toISOString()
   };
   await apiRequest(`/rooms/${encodeURIComponent(currentRoomId)}/files`, {
@@ -388,7 +420,7 @@ async function sendChatMessage() {
       method: "POST",
       body: JSON.stringify({
         id: cryptoRandomId(),
-        sender: IS_IOS ? "Mobile" : "Desktop",
+        sender: deviceName(),
         message: msg,
         created_at: new Date().toISOString()
       })
@@ -406,9 +438,26 @@ async function renderChatMessages() {
   if (!container) return;
 
   container.innerHTML = currentMessages.map(message => {
-    const isOwn = message.sender === (IS_IOS ? "Mobile" : "Desktop");
-    return `<div class="chat-msg ${isOwn ? "self" : "other"}">${escapeHtml(message.message)}</div>`;
+    const isOwn = message.sender === deviceName();
+    return `
+      <div class="chat-msg ${isOwn ? "self" : "other"}" data-message-id="${escapeAttr(message.id)}">
+        <span class="chat-msg-text">${linkifyMessage(message.message)}</span>
+        <button class="chat-copy-btn" type="button" title="コピー" aria-label="メッセージをコピー">
+          <i class="fa-regular fa-copy"></i>
+        </button>
+      </div>
+    `;
   }).join("");
+
+  container.querySelectorAll(".chat-copy-btn").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.closest(".chat-msg")?.dataset.messageId;
+      const message = currentMessages.find(item => String(item.id) === String(id));
+      if (message) copyText(message.message);
+    });
+  });
 
   requestAnimationFrame(() => {
     container.scrollTop = container.scrollHeight;
@@ -431,6 +480,18 @@ function showRoomQr() {
   $("qrRoomId").textContent = currentRoomId;
   drawQr("qrCanvas", roomUrl(currentRoomId));
   openModal("qrModal");
+}
+
+function handlePeerJoined() {
+  if (!isRoomCreator || lastClientCount < 2) return;
+  const qrModal = $("qrModal");
+  const setupQrArea = $("setupQrArea");
+  const qrIsOpen = qrModal?.style.display !== "none" || setupQrArea?.style.display !== "none";
+  if (!qrIsOpen) return;
+
+  closeModal("qrModal");
+  if (setupQrArea) setupQrArea.style.display = "none";
+  showToast("相手が参加しました。ファイルとメッセージを共有できます。", "success");
 }
 
 async function shareRoom() {
@@ -620,7 +681,10 @@ function updateSyncStatus() {
 
   if (apiOnline) {
     status.className = "sync-status connected";
-    status.innerHTML = `<i class="fa-solid fa-circle-check"></i><span>AirShareサーバー接続中。同じWi-Fiの端末と共有できます。</span>`;
+    const peerText = currentRoomId
+      ? (lastClientCount > 1 ? "相手が参加済みです。ファイルとメッセージを共有できます。" : "相手の参加待ちです。QRコードかリンクを開いてもらってください。")
+      : "同じWi-Fiの端末と共有できます。";
+    status.innerHTML = `<i class="fa-solid fa-circle-check"></i><span>AirShareサーバー接続中。${peerText}</span>`;
     return;
   }
 
@@ -706,6 +770,25 @@ function escapeHtml(text) {
 
 function escapeAttr(text) {
   return escapeHtml(text).replace(/`/g, "&#096;");
+}
+
+function linkifyMessage(text) {
+  const value = String(text ?? "");
+  const urlPattern = /\bhttps?:\/\/[^\s<]+/g;
+  let html = "";
+  let lastIndex = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const url = match[0];
+    const start = match.index;
+    const cleanUrl = url.replace(/[.,!?;:)]+$/g, "");
+    const suffix = url.slice(cleanUrl.length);
+    html += escapeHtml(value.slice(lastIndex, start));
+    html += `<a href="${escapeAttr(cleanUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(cleanUrl)}</a>`;
+    html += escapeHtml(suffix);
+    lastIndex = start + url.length;
+  }
+  html += escapeHtml(value.slice(lastIndex));
+  return html;
 }
 
 function cryptoRandomId() {
