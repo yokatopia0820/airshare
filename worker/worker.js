@@ -1,23 +1,22 @@
 const CLIENT_TTL_MS = 15 * 1000;
 const ROOM_RETENTION_MS = 24 * 60 * 60 * 1000;
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 1 * 1024 * 1024;
 const MAX_MESSAGES = 200;
 
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return withCors(new Response(null, { status: 204 }));
     if (!env.DB) return withCors(json({ error: "D1 binding DB is required" }, 500));
-    if (!env.FILES) return withCors(json({ error: "R2 binding FILES is required" }, 500));
 
     try {
       const url = new URL(request.url);
       if (url.pathname === "/api/health" || url.pathname === "/health") {
-        return withCors(json({ ok: true, publicBaseUrl: url.origin }));
-      }
-
-      const fileContentMatch = url.pathname.match(/^\/(?:api\/)?rooms\/([^/]+)\/files\/([^/]+)\/content$/);
-      if (fileContentMatch && (request.method === "GET" || request.method === "HEAD")) {
-        return withCors(await getFileContent(request, env, fileContentMatch[1], fileContentMatch[2]));
+        return withCors(json({
+          ok: true,
+          publicBaseUrl: url.origin,
+          maxFileBytes: MAX_FILE_BYTES,
+          storage: "d1"
+        }));
       }
 
       const match = url.pathname.match(/^\/(?:api\/)?rooms\/([^/]+)(?:\/(files|messages))?$/);
@@ -25,7 +24,7 @@ export default {
 
       const roomId = normalizeRoomId(match[1]);
       const resource = match[2] || "";
-      await pruneRoom(env, roomId);
+      await pruneRoom(env.DB, roomId);
 
       if (!resource && request.method === "GET") {
         return withCors(json(await roomStatus(env.DB, roomId)));
@@ -38,16 +37,17 @@ export default {
       }
 
       if (resource === "files" && request.method === "GET") {
-        return withCors(json(await listFiles(env.DB, roomId, url.origin)));
+        return withCors(json(await listFiles(env.DB, roomId)));
       }
 
       if (resource === "files" && request.method === "POST") {
         const body = await readJson(request);
-        return withCors(json(await insertFile(env, roomId, body, url.origin)));
+        return withCors(json(await insertFile(env.DB, roomId, body)));
       }
 
       if (resource === "files" && request.method === "DELETE") {
-        return withCors(json(await clearFiles(env, roomId)));
+        await env.DB.prepare("DELETE FROM files WHERE room_id = ?").bind(roomId).run();
+        return withCors(json({ ok: true }));
       }
 
       if (resource === "messages" && request.method === "GET") {
@@ -92,7 +92,8 @@ async function roomStatus(db, roomId) {
     roomId,
     clientCount: clients.results.length,
     clients: clients.results,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    maxFileBytes: MAX_FILE_BYTES
   };
 }
 
@@ -101,56 +102,42 @@ async function deleteExpiredClients(db) {
   await db.prepare("DELETE FROM room_clients WHERE last_seen < ?").bind(cutoff).run();
 }
 
-async function pruneRoom(env, roomId) {
+async function pruneRoom(db, roomId) {
   const cutoff = new Date(Date.now() - ROOM_RETENTION_MS).toISOString();
-  const staleFiles = await env.DB.prepare(`
-    SELECT object_key
-    FROM files
-    WHERE room_id = ? AND created_at < ?
-  `).bind(roomId, cutoff).all();
-
-  await Promise.all(staleFiles.results.map(file => env.FILES.delete(file.object_key)));
-  await env.DB.prepare("DELETE FROM files WHERE room_id = ? AND created_at < ?").bind(roomId, cutoff).run();
-  await env.DB.prepare("DELETE FROM chat_messages WHERE room_id = ? AND created_at < ?").bind(roomId, cutoff).run();
+  await db.prepare("DELETE FROM files WHERE room_id = ? AND created_at < ?").bind(roomId, cutoff).run();
+  await db.prepare("DELETE FROM chat_messages WHERE room_id = ? AND created_at < ?").bind(roomId, cutoff).run();
 }
 
-async function listFiles(db, roomId, origin) {
+async function listFiles(db, roomId) {
   const result = await db.prepare(`
-    SELECT id, room_id, name, type, size, sender, created_at
+    SELECT id, room_id, name, type, size, data_url, sender, created_at
     FROM files
     WHERE room_id = ?
     ORDER BY created_at DESC
-    LIMIT 100
+    LIMIT 50
   `).bind(roomId).all();
-
-  return result.results.map(file => ({
-    ...file,
-    content_url: `${origin}/api/rooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(file.id)}/content`
-  }));
+  return result.results;
 }
 
-async function insertFile(env, roomId, body, origin) {
+async function insertFile(db, roomId, body) {
   const id = String(body.id || cryptoRandomId()).slice(0, 100);
   const name = String(body.name || "file").slice(0, 240);
   const type = String(body.type || "application/octet-stream").slice(0, 120);
   const size = Number(body.size || 0);
+  const dataUrl = String(body.data_url || "");
   const sender = String(body.sender || "Device").slice(0, 40);
   const createdAt = body.created_at || new Date().toISOString();
-  const bytes = dataUrlToBytes(String(body.data_url || ""));
+  const bytes = dataUrlByteLength(dataUrl);
 
-  if (!bytes.byteLength) throw new Error("File data is empty");
-  if (bytes.byteLength > MAX_FILE_BYTES || size > MAX_FILE_BYTES) throw new Error("File exceeds the size limit");
+  if (!dataUrl) throw new Error("File data is empty");
+  if (bytes > MAX_FILE_BYTES || size > MAX_FILE_BYTES) {
+    throw new Error("Public mode supports files up to 1MB. Use local Wi-Fi mode for larger files.");
+  }
 
-  const objectKey = `${roomId}/${id}`;
-  await env.FILES.put(objectKey, bytes, {
-    httpMetadata: { contentType: type },
-    customMetadata: { name, roomId, id }
-  });
-
-  await env.DB.prepare(`
-    INSERT OR REPLACE INTO files (id, room_id, name, type, size, object_key, sender, created_at)
+  await db.prepare(`
+    INSERT OR REPLACE INTO files (id, room_id, name, type, size, data_url, sender, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(id, roomId, name, type, bytes.byteLength || size, objectKey, sender, createdAt).run();
+  `).bind(id, roomId, name, type, size || bytes, dataUrl, sender, createdAt).run();
 
   return {
     ok: true,
@@ -159,44 +146,12 @@ async function insertFile(env, roomId, body, origin) {
       room_id: roomId,
       name,
       type,
-      size: bytes.byteLength || size,
+      size: size || bytes,
+      data_url: dataUrl,
       sender,
-      created_at: createdAt,
-      content_url: `${origin}/api/rooms/${encodeURIComponent(roomId)}/files/${encodeURIComponent(id)}/content`
+      created_at: createdAt
     }
   };
-}
-
-async function getFileContent(request, env, rawRoomId, rawFileId) {
-  const roomId = normalizeRoomId(rawRoomId);
-  const fileId = decodeURIComponent(rawFileId);
-  const metadata = await env.DB.prepare(`
-    SELECT name, type, object_key
-    FROM files
-    WHERE room_id = ? AND id = ?
-  `).bind(roomId, fileId).first();
-
-  if (!metadata) return json({ error: "File not found" }, 404);
-
-  const object = await env.FILES.get(metadata.object_key);
-  if (!object) return json({ error: "File content not found" }, 404);
-
-  const headers = new Headers();
-  headers.set("Content-Type", metadata.type || object.httpMetadata?.contentType || "application/octet-stream");
-  headers.set("Content-Length", String(object.size));
-  headers.set("Cache-Control", "private, max-age=60");
-  headers.set("Content-Disposition", `attachment; filename*=UTF-8''${encodeRFC5987ValueChars(metadata.name)}`);
-  headers.set("Accept-Ranges", "bytes");
-
-  if (request.method === "HEAD") return new Response(null, { headers });
-  return new Response(object.body, { headers });
-}
-
-async function clearFiles(env, roomId) {
-  const files = await env.DB.prepare("SELECT object_key FROM files WHERE room_id = ?").bind(roomId).all();
-  await Promise.all(files.results.map(file => env.FILES.delete(file.object_key)));
-  await env.DB.prepare("DELETE FROM files WHERE room_id = ?").bind(roomId).run();
-  return { ok: true };
 }
 
 async function listMessages(db, roomId) {
@@ -233,18 +188,13 @@ async function readJson(request) {
   }
 }
 
-function dataUrlToBytes(dataUrl) {
-  const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
-  if (!match) throw new Error("Invalid file data");
-  const isBase64 = Boolean(match[2]);
-  const payload = match[3] || "";
-
-  if (!isBase64) return new TextEncoder().encode(decodeURIComponent(payload));
-
-  const binary = atob(payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function dataUrlByteLength(dataUrl) {
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex < 0) return 0;
+  const header = dataUrl.slice(0, commaIndex);
+  const payload = dataUrl.slice(commaIndex + 1);
+  if (header.includes(";base64")) return Math.floor(payload.length * 3 / 4);
+  return new TextEncoder().encode(decodeURIComponent(payload)).byteLength;
 }
 
 function normalizeRoomId(value) {
@@ -261,15 +211,11 @@ function json(data, status = 200) {
 function withCors(response) {
   const headers = new Headers(response.headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, HEAD, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function cryptoRandomId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-function encodeRFC5987ValueChars(value) {
-  return encodeURIComponent(value).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS files (
   name TEXT NOT NULL,
   type TEXT NOT NULL,
   size INTEGER NOT NULL,
-  object_key TEXT NOT NULL,
+  data_url TEXT NOT NULL,
   sender TEXT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -7,5 +7,6 @@ sub.out
 node_modules/
 package-lock.json
 worker/wrangler.toml
+.wrangler/
 .DS_Store
 Thumbs.db

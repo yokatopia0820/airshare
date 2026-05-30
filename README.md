@@ -30,18 +30,17 @@ Windows では `AirShare local` を開きます。スマートフォンは、ア
 
 - GitHub Pages: 静的フロントエンド
 - Cloudflare Workers: 公開 API
-- Cloudflare D1: ルーム、チャット、参加者、ファイル情報
-- Cloudflare R2: ファイル本体
+- Cloudflare D1: ルーム、チャット、参加者、小さめのファイル
 
 これにより、同じ Wi-Fi にいない端末同士でも、QR コードやリンクから同じルームへ参加できます。
+課金登録を避けるため、R2 は使っていません。その代わり、インターネット版のファイル上限は 1MB です。
 
 ### 1. Cloudflare リソースを作成
 
-Wrangler を使って D1 データベースと R2 バケットを作成します。
+Wrangler を使って D1 データベースを作成します。
 
 ```powershell
 npx wrangler d1 create airshare
-npx wrangler r2 bucket create airshare-files
 ```
 
 `worker/wrangler.example.toml` を `worker/wrangler.toml` にコピーし、作成時に表示された D1 の `database_id` を入れます。
@@ -55,10 +54,6 @@ compatibility_date = "2026-05-28"
 binding = "DB"
 database_name = "airshare"
 database_id = "replace-with-your-d1-database-id"
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "airshare-files"
 ```
 
 テーブルを作成します。
@@ -79,14 +74,15 @@ npx wrangler deploy
 `js/config.js` を編集し、デプロイした Worker の URL を設定します。
 
 ```js
-window.AIRSHARE_API_URL = "https://airshare-api.your-subdomain.workers.dev";
+window.AIRSHARE_API_URL = "https://airshare-share.mogera-yoooo.workers.dev";
 ```
 
 その後、変更を commit / push すると GitHub Pages 側から公開 API に接続できます。
 
 ## 現在の制限
 
-- ファイル上限は 1 ファイル 50MB です。
+- ローカル Wi-Fi 版のファイル上限は 1 ファイル 50MB です。
+- インターネット版のファイル上限は 1 ファイル 1MB です。
 - ルームはルーム ID を知っている人が参加できる簡易共有スペースです。
 - 参加者表示は約 15 秒間通信がないと非アクティブ扱いになります。
 - ファイルとメッセージは、ルームに再アクセスされたタイミングで約 24 時間後に削除対象になります。
@@ -95,6 +91,7 @@ window.AIRSHARE_API_URL = "https://airshare-api.your-subdomain.workers.dev";
 
 - QR コード自体がファイルを送っているわけではありません。QR はルーム URL を渡すためのものです。
 - 離れた場所の端末同士で共有するには、必ず公開された中継バックエンドが必要です。このプロジェクトでは Cloudflare Worker がその役割です。
+- 大きな写真、動画、PDF をインターネット越しに扱う場合は、R2 などのオブジェクトストレージが必要です。
 - `worker/wrangler.toml` には Cloudflare アカウント固有の ID が入るため、公開したくない場合は commit しないでください。
 
 ## 構成

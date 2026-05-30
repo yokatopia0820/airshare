@@ -1,4 +1,4 @@
-name = "airshare-api"
+name = "airshare-share"
 main = "worker.js"
 compatibility_date = "2026-05-28"
 
@@ -6,7 +6,3 @@ compatibility_date = "2026-05-28"
 binding = "DB"
 database_name = "airshare"
 database_id = "replace-with-your-d1-database-id"
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "airshare-files"
