@@ -66,6 +66,9 @@ function bindEvents() {
   $("btnCloseScan")?.addEventListener("click", closeScanner);
   $("btnClosePreview")?.addEventListener("click", closePreview);
   $("btnDownload")?.addEventListener("click", downloadSelectedFile);
+  document.querySelectorAll("[data-view]").forEach(button => {
+    button.addEventListener("click", () => setMainView(button.dataset.view));
+  });
   $("btnSendMessage")?.addEventListener("click", () => {
     playClick();
     sendChatMessage();
@@ -194,6 +197,7 @@ async function enterRoom(roomId) {
 
   $("setupScreen").classList.remove("active");
   $("mainScreen").classList.add("active");
+  setMainView("files");
   $("roomIdDisplay").textContent = roomId;
   const chatArea = $("chatArea");
   if (chatArea) chatArea.style.display = "flex";
@@ -683,21 +687,52 @@ function updateSyncStatus() {
       const note = setupCard.querySelector(".setup-note");
       setupCard.insertBefore(status, note || null);
     } else {
-      target.prepend(status);
+      const roomBar = target.querySelector(".room-info-bar");
+      roomBar?.insertAdjacentElement("afterend", status);
     }
   }
 
   if (apiOnline) {
-    status.className = "sync-status connected";
-    const peerText = currentRoomId
-      ? (lastClientCount > 1 ? "相手が参加済みです。ファイルとメッセージを共有できます。" : "相手の参加待ちです。QRコードかリンクを開いてもらってください。")
-      : "同じWi-Fiの端末と共有できます。";
-    status.innerHTML = `<i class="fa-solid fa-circle-check"></i><span>AirShareサーバー接続中。${peerText}</span>`;
+    const hasPeer = currentRoomId && lastClientCount > 1;
+    const title = currentRoomId
+      ? (hasPeer ? "相手が参加済み" : "相手の参加待ち")
+      : "同期サーバー接続中";
+    const detail = currentRoomId
+      ? (hasPeer ? "ファイルとメッセージを共有できます" : "QRコードかリンクを開いてもらってください")
+      : "公開APIへ接続できます";
+    status.className = `sync-status connected ${hasPeer ? "peer-online" : "peer-waiting"}`;
+    status.innerHTML = `
+      <span class="status-icon"><i class="fa-solid ${hasPeer ? "fa-user-check" : "fa-user-clock"}"></i></span>
+      <span class="status-copy">
+        <strong>${title}</strong>
+        <span>${detail}</span>
+      </span>
+      <span class="status-chip"><span class="presence-dot"></span>${currentRoomId ? (hasPeer ? "Online" : "Waiting") : "Ready"}</span>
+    `;
     return;
   }
 
   status.className = "sync-status disconnected";
-  status.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>Windows側でAirShareサーバーを起動してください。</span>`;
+  status.innerHTML = `
+    <span class="status-icon"><i class="fa-solid fa-triangle-exclamation"></i></span>
+    <span class="status-copy">
+      <strong>同期サーバー未接続</strong>
+      <span>インターネット共有には公開APIが必要です</span>
+    </span>
+  `;
+}
+
+function setMainView(view) {
+  const next = view === "messages" ? "messages" : "files";
+  document.querySelectorAll("[data-view]").forEach(button => {
+    const active = button.dataset.view === next;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-panel]").forEach(panel => {
+    panel.classList.toggle("active", panel.dataset.panel === next);
+  });
+  $("mainScreen")?.setAttribute("data-active-view", next);
 }
 
 function showJoinError(message) {
