@@ -1,7 +1,7 @@
 const API_URL = getApiUrl();
 const PUBLIC_BASE_URL = getPublicBaseUrl();
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;
 const POLL_INTERVAL_MS = 1500;
 const CLIENT_ID = getClientId();
 
@@ -15,6 +15,7 @@ let scanFrameId = null;
 let apiOnline = false;
 let isRoomCreator = false;
 let lastClientCount = 0;
+let maxFileSize = DEFAULT_MAX_FILE_SIZE;
 
 const $ = id => document.getElementById(id);
 
@@ -115,6 +116,11 @@ async function checkApi() {
   try {
     const response = await fetch(`${API_URL}/health`, { cache: "no-store" });
     apiOnline = response.ok;
+    if (apiOnline) {
+      const data = await response.json().catch(() => ({}));
+      maxFileSize = Number(data.maxFileBytes || DEFAULT_MAX_FILE_SIZE);
+      updateFileLimitText();
+    }
     return apiOnline;
   } catch {
     apiOnline = false;
@@ -293,21 +299,35 @@ async function handleFiles(files) {
     return;
   }
 
-  const validFiles = files.filter(file => {
-    if (file.size > MAX_FILE_SIZE) {
-      showToast(`${file.name} は50MBを超えています`, "error");
-      return false;
+  let uploadedCount = 0;
+  for (const file of files) {
+    try {
+      const uploadable = await prepareFileForUpload(file);
+      if (!uploadable) continue;
+      await uploadFile(uploadable);
+      uploadedCount += 1;
+    } catch (error) {
+      console.error("ファイル送信エラー:", error);
+      showToast(`${file.name} を共有できませんでした`, "error");
     }
-    return true;
-  });
-
-  for (const file of validFiles) {
-    await uploadFile(file);
   }
 
   $("fileInput").value = "";
   await pollRoom();
-  if (validFiles.length) showToast(`${validFiles.length}件のファイルを共有しました`, "success");
+  if (uploadedCount) showToast(`${uploadedCount}件のファイルを共有しました`, "success");
+}
+
+async function prepareFileForUpload(file) {
+  if (file.size <= maxFileSize) return file;
+
+  if (file.type?.startsWith("image/")) {
+    showToast(`${file.name} を共有用に圧縮しています`, "info");
+    const compressed = await compressImageFile(file, maxFileSize);
+    if (compressed.size <= maxFileSize) return compressed;
+  }
+
+  showToast(`${file.name} は${formatBytes(maxFileSize)}を超えています`, "error");
+  return null;
 }
 
 async function uploadFile(file) {
@@ -735,6 +755,21 @@ function setMainView(view) {
   $("mainScreen")?.setAttribute("data-active-view", next);
 }
 
+function updateFileLimitText() {
+  const limit = document.querySelector(".drop-limit");
+  if (!limit) return;
+  let isPublicApi = false;
+  try {
+    const apiHost = new URL(API_URL).hostname;
+    isPublicApi = apiHost.endsWith(".workers.dev");
+  } catch {
+    isPublicApi = false;
+  }
+  limit.textContent = isPublicApi
+    ? `インターネット版は${formatBytes(maxFileSize)}まで`
+    : `最大${formatBytes(maxFileSize)} / 複数ファイル対応`;
+}
+
 function showJoinError(message) {
   const error = $("joinError");
   error.textContent = message;
@@ -776,6 +811,52 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function compressImageFile(file, targetBytes) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = async () => {
+      try {
+        let scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+        let quality = 0.82;
+        let blob = null;
+
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          blob = await canvasToBlob(canvas, "image/jpeg", quality);
+          if (blob.size <= targetBytes) break;
+          quality = Math.max(0.45, quality - 0.12);
+          scale *= 0.82;
+        }
+
+        URL.revokeObjectURL(objectUrl);
+        if (!blob) {
+          resolve(file);
+          return;
+        }
+        const name = file.name.replace(/\.[^.]+$/, "") || "image";
+        resolve(new File([blob], `${name}.jpg`, { type: "image/jpeg", lastModified: Date.now() }));
+      } catch (error) {
+        URL.revokeObjectURL(objectUrl);
+        reject(error);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
 }
 
 async function dataUrlToText(dataUrl) {
