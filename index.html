@@ -10,7 +10,7 @@
   <!-- QRコードスキャン / 生成ライブラリ -->
   <script src="vendor/jsQR.js?v=20260529-1"></script>
   <script src="vendor/qrcode.js?v=20260529-1"></script>
-  <link rel="stylesheet" href="css/style.css?v=20260530-2">
+  <link rel="stylesheet" href="css/style.css?v=20260530-3">
   
   <!-- QRエリア ボタン行 専用スタイル -->
   <style>
@@ -304,64 +304,42 @@
       </div>
     </div>
 
-    <div class="main-tabs" role="tablist" aria-label="共有ビュー">
-      <button class="main-tab active" type="button" id="tabFiles" data-view="files" role="tab" aria-selected="true">
-        <i class="fa-solid fa-cloud-arrow-up"></i>
-        <span>ファイル</span>
-      </button>
-      <button class="main-tab" type="button" id="tabMessages" data-view="messages" role="tab" aria-selected="false">
-        <i class="fa-solid fa-comments"></i>
-        <span>メッセージ</span>
-      </button>
-    </div>
-
     <div class="main-layout">
-      <section class="workspace-panel file-panel active" id="filePanel" data-panel="files" aria-label="ファイル共有">
-        <!-- ドラッグ&ドロップ / ファイル選択 -->
+      <section class="conversation-panel" id="conversationPanel" aria-label="ファイルとメッセージ">
         <div class="drop-zone" id="dropZone">
           <div class="drop-zone-inner">
             <div class="drop-hint" id="dropHint">
               <div class="upload-visual" aria-hidden="true">
                 <i class="fa-solid fa-cloud-arrow-up"></i>
               </div>
-              <p class="drop-title">ここにファイルを追加</p>
-              <p class="drop-sub">写真・PDF・小さなファイルを共有</p>
+              <p class="drop-title">ファイルや写真を追加</p>
+              <p class="drop-sub">この会話にそのまま流れます</p>
               <label for="fileInput" id="fileInputLabel" class="file-select-link">
                 <i class="fa-solid fa-folder-open"></i> ファイルを選択
               </label>
-              <input type="file" id="fileInput" multiple>
-              <p class="drop-limit">インターネット版は1MBまで / ローカル版は50MBまで</p>
+              <p class="drop-limit">インターネット版は1MBまで</p>
             </div>
           </div>
         </div>
 
-        <!-- ファイルリスト -->
-        <div id="fileList" class="file-list"></div>
-
-        <!-- アクションバー -->
-        <div class="action-bar">
-          <button class="btn-sm" id="btnRefresh">
-            <i class="fa-solid fa-arrows-rotate"></i> 更新
-          </button>
-          <button class="btn-sm danger" id="btnClearAll" style="display:none">
-            <i class="fa-solid fa-trash"></i> すべて削除
-          </button>
-        </div>
-      </section>
-
-      <section class="workspace-panel message-panel" id="messagePanel" data-panel="messages" aria-label="メッセージ">
-        <!-- チャットエリア -->
         <div id="chatArea" class="chat-area" style="display:none">
           <div class="chat-header">
-            <i class="fa-solid fa-comments"></i> メッセージ
-          </div>
-          <div class="chat-input-row">
-            <input type="text" id="chatInput" class="chat-input" placeholder="メッセージを入力..." autocomplete="off">
-            <button id="btnSendMessage" class="btn-send-msg">
-              <i class="fa-solid fa-paper-plane"></i>
+            <span><i class="fa-solid fa-comments"></i> トーク</span>
+            <button class="btn-sm danger" id="btnClearAll" style="display:none">
+              <i class="fa-solid fa-trash"></i> ファイル削除
             </button>
           </div>
           <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input-row">
+            <label for="fileInput" class="composer-attach" title="ファイルを追加" aria-label="ファイルを追加">
+              <i class="fa-solid fa-plus"></i>
+            </label>
+            <input type="file" id="fileInput" multiple>
+            <input type="text" id="chatInput" class="chat-input" placeholder="メッセージを入力..." autocomplete="off">
+            <button id="btnSendMessage" class="btn-send-msg" aria-label="送信">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </div>
         </div>
       </section>
     </div>

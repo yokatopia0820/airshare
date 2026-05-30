@@ -67,9 +67,6 @@ function bindEvents() {
   $("btnCloseScan")?.addEventListener("click", closeScanner);
   $("btnClosePreview")?.addEventListener("click", closePreview);
   $("btnDownload")?.addEventListener("click", downloadSelectedFile);
-  document.querySelectorAll("[data-view]").forEach(button => {
-    button.addEventListener("click", () => setMainView(button.dataset.view));
-  });
   $("btnSendMessage")?.addEventListener("click", () => {
     playClick();
     sendChatMessage();
@@ -203,7 +200,6 @@ async function enterRoom(roomId) {
 
   $("setupScreen").classList.remove("active");
   $("mainScreen").classList.add("active");
-  setMainView("files");
   $("roomIdDisplay").textContent = roomId;
   const chatArea = $("chatArea");
   if (chatArea) chatArea.style.display = "flex";
@@ -226,14 +222,15 @@ function leaveRoom() {
   selectedFile = null;
   $("mainScreen").classList.remove("active");
   $("setupScreen").classList.add("active");
-  $("fileList").innerHTML = "";
-  $("roomIdDisplay").textContent = "";
-  const chatArea = $("chatArea");
   const chatMessages = $("chatMessages");
   const chatInput = $("chatInput");
+  const fileInput = $("fileInput");
+  $("roomIdDisplay").textContent = "";
+  const chatArea = $("chatArea");
   if (chatArea) chatArea.style.display = "none";
   if (chatMessages) chatMessages.innerHTML = "";
   if (chatInput) chatInput.value = "";
+  if (fileInput) fileInput.value = "";
   history.replaceState(null, "", location.pathname);
   updateSyncStatus();
 }
@@ -259,8 +256,7 @@ async function pollRoom() {
     lastClientCount = Number(status?.clientCount || 0);
     currentFiles = Array.isArray(files) ? files : [];
     currentMessages = Array.isArray(messages) ? messages : [];
-    renderFileList();
-    await renderChatMessages();
+    renderActivityFeed();
     handlePeerJoined();
     updateSyncStatus();
   } catch (error) {
@@ -287,6 +283,8 @@ async function ensureApiOnline() {
 }
 
 async function handleFiles(files) {
+  if (!files.length) return;
+
   if (!currentRoomId) {
     showToast("先にルームへ参加してください", "error");
     return;
@@ -312,7 +310,8 @@ async function handleFiles(files) {
     }
   }
 
-  $("fileInput").value = "";
+  const fileInput = $("fileInput");
+  if (fileInput) fileInput.value = "";
   await pollRoom();
   if (uploadedCount) showToast(`${uploadedCount}件のファイルを共有しました`, "success");
 }
@@ -353,32 +352,26 @@ async function clearAllFiles() {
 }
 
 function renderFileList() {
-  const container = $("fileList");
-  container.innerHTML = currentFiles.map(file => `
-    <div class="file-card" data-id="${escapeAttr(file.id)}">
-      <div class="file-thumb">${thumbnailHtml(file)}</div>
-      <div class="file-info">
-        <div class="file-name" title="${escapeAttr(file.name)}">${escapeHtml(file.name)}</div>
-        <div class="file-meta">
-          <span>${formatBytes(Number(file.size) || 0)}</span>
-          <span>${escapeHtml(file.sender || "Unknown")}</span>
-          <span>${formatDate(file.created_at)}</span>
-        </div>
-      </div>
-      <div class="file-actions">
-        <button class="btn-icon" type="button" data-action="preview" title="プレビュー">
-          <i class="fa-solid fa-eye"></i>
-        </button>
-        <button class="btn-icon" type="button" data-action="download" title="ダウンロード">
-          <i class="fa-solid fa-download"></i>
-        </button>
-      </div>
-    </div>
-  `).join("");
+  renderActivityFeed();
+}
 
-  $("btnClearAll").style.display = currentFiles.length ? "inline-flex" : "none";
+function renderActivityFeed() {
+  const container = $("chatMessages");
+  if (!container) return;
 
-  container.querySelectorAll(".file-card").forEach(card => {
+  const entries = [
+    ...currentFiles.map(file => ({ kind: "file", created_at: file.created_at, item: file })),
+    ...currentMessages.map(message => ({ kind: "message", created_at: message.created_at, item: message }))
+  ].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+
+  container.innerHTML = entries.length
+    ? entries.map(entry => entry.kind === "file" ? fileBubbleHtml(entry.item) : messageBubbleHtml(entry.item)).join("")
+    : `<div class="empty-feed"><i class="fa-regular fa-comment-dots"></i><span>ファイルやメッセージがここに表示されます</span></div>`;
+
+  const clearButton = $("btnClearAll");
+  if (clearButton) clearButton.style.display = currentFiles.length ? "inline-flex" : "none";
+
+  container.querySelectorAll(".activity-file").forEach(card => {
     card.addEventListener("click", event => {
       const action = event.target.closest("[data-action]")?.dataset.action || "preview";
       const file = currentFiles.find(item => item.id === card.dataset.id);
@@ -387,6 +380,67 @@ function renderFileList() {
       else previewFile(file);
     });
   });
+
+  container.querySelectorAll(".chat-copy-btn").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.closest(".chat-msg")?.dataset.messageId;
+      const message = currentMessages.find(item => String(item.id) === String(id));
+      if (message) copyText(message.message);
+    });
+  });
+
+  requestAnimationFrame(() => {
+    container.scrollTop = container.scrollHeight;
+  });
+}
+
+function messageBubbleHtml(message) {
+  const isOwn = message.sender === deviceName();
+  return `
+    <div class="activity-row ${isOwn ? "self" : "other"}">
+      <div class="chat-msg ${isOwn ? "self" : "other"}" data-message-id="${escapeAttr(message.id)}">
+        <span class="chat-msg-text">${linkifyMessage(message.message)}</span>
+        <button class="chat-copy-btn" type="button" title="コピー" aria-label="メッセージをコピー">
+          <i class="fa-regular fa-copy"></i>
+        </button>
+      </div>
+      <span class="activity-time">${formatDate(message.created_at)}</span>
+    </div>
+  `;
+}
+
+function fileBubbleHtml(file) {
+  const isOwn = file.sender === deviceName();
+  const isImage = file.type?.startsWith("image/");
+  return `
+    <div class="activity-row ${isOwn ? "self" : "other"}">
+      <div class="activity-file ${isOwn ? "self" : "other"}" data-id="${escapeAttr(file.id)}">
+        ${isImage ? `<div class="activity-image">${thumbnailHtml(file)}</div>` : ""}
+        <div class="activity-file-body">
+          ${isImage ? "" : `<div class="file-thumb">${thumbnailHtml(file)}</div>`}
+          <div class="file-info">
+            <div class="file-name" title="${escapeAttr(file.name)}">${escapeHtml(file.name)}</div>
+            <div class="file-meta">
+              <span>${formatBytes(Number(file.size) || 0)}</span>
+              <span>${escapeHtml(file.sender || "Unknown")}</span>
+              <span>${formatDate(file.created_at)}</span>
+            </div>
+          </div>
+          <div class="file-actions">
+            <button class="btn-icon" type="button" data-action="preview" title="プレビュー">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+            <button class="btn-icon" type="button" data-action="download" title="ダウンロード">
+              <i class="fa-solid fa-download"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <span class="activity-time">${formatDate(file.created_at)}</span>
+    </div>
+  `;
 }
 
 function thumbnailHtml(file) {
@@ -466,34 +520,7 @@ async function sendChatMessage() {
 }
 
 async function renderChatMessages() {
-  const container = $("chatMessages");
-  if (!container) return;
-
-  container.innerHTML = currentMessages.map(message => {
-    const isOwn = message.sender === deviceName();
-    return `
-      <div class="chat-msg ${isOwn ? "self" : "other"}" data-message-id="${escapeAttr(message.id)}">
-        <span class="chat-msg-text">${linkifyMessage(message.message)}</span>
-        <button class="chat-copy-btn" type="button" title="コピー" aria-label="メッセージをコピー">
-          <i class="fa-regular fa-copy"></i>
-        </button>
-      </div>
-    `;
-  }).join("");
-
-  container.querySelectorAll(".chat-copy-btn").forEach(button => {
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const id = button.closest(".chat-msg")?.dataset.messageId;
-      const message = currentMessages.find(item => String(item.id) === String(id));
-      if (message) copyText(message.message);
-    });
-  });
-
-  requestAnimationFrame(() => {
-    container.scrollTop = container.scrollHeight;
-  });
+  renderActivityFeed();
 }
 
 async function apiRequest(path, options = {}) {
@@ -740,19 +767,6 @@ function updateSyncStatus() {
       <span>インターネット共有には公開APIが必要です</span>
     </span>
   `;
-}
-
-function setMainView(view) {
-  const next = view === "messages" ? "messages" : "files";
-  document.querySelectorAll("[data-view]").forEach(button => {
-    const active = button.dataset.view === next;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  document.querySelectorAll("[data-panel]").forEach(panel => {
-    panel.classList.toggle("active", panel.dataset.panel === next);
-  });
-  $("mainScreen")?.setAttribute("data-active-view", next);
 }
 
 function updateFileLimitText() {

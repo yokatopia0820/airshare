@@ -460,6 +460,8 @@ button {
 #mainScreen.active {
   display: flex;
   flex-direction: column;
+  height: calc(100dvh - 56px);
+  max-height: calc(100dvh - 56px);
   overflow: hidden;
 }
 
@@ -1323,6 +1325,274 @@ button {
 @media (hover: none) {
   .chat-copy-btn {
     opacity: .72;
+  }
+}
+
+/* Unified conversation surface: files and messages share one LINE-like flow. */
+.main-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0 16px 14px;
+  overflow: hidden;
+}
+
+.conversation-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--bg) 14%);
+}
+
+.conversation-panel .drop-zone {
+  flex: 0 0 auto;
+  padding: 14px;
+}
+
+.conversation-panel .drop-zone-inner {
+  padding: 18px 16px;
+}
+
+.conversation-panel .drop-hint {
+  gap: 8px;
+}
+
+.conversation-panel .upload-visual {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+}
+
+#chatArea.chat-area {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+#chatArea .chat-header {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+#chatArea .chat-messages {
+  order: 1;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  margin: 0;
+  padding: 16px;
+  gap: 10px;
+}
+
+#chatArea .chat-input-row {
+  order: 2;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg) 8%);
+}
+
+#chatArea .chat-input {
+  min-width: 0;
+  height: 42px;
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.composer-attach,
+#chatArea .btn-send-msg {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.composer-attach {
+  border: 1px solid var(--border);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--surface) 78%, var(--accent) 22%);
+  cursor: pointer;
+}
+
+.composer-attach:active,
+#chatArea .btn-send-msg:active {
+  transform: scale(.96);
+}
+
+.activity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.activity-row.self {
+  align-items: flex-end;
+}
+
+.activity-row.other {
+  align-items: flex-start;
+}
+
+#chatArea .chat-msg {
+  max-width: min(78%, 560px);
+  min-width: 0;
+  padding: 9px 38px 9px 13px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .12);
+}
+
+.activity-file {
+  max-width: min(82%, 420px);
+  min-width: min(280px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .14);
+}
+
+.activity-file.self {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface) 82%);
+}
+
+.activity-image {
+  max-height: 260px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.activity-image img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+}
+
+.activity-file-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+}
+
+.activity-file .file-info {
+  min-width: 0;
+}
+
+.activity-file .file-actions {
+  gap: 6px;
+  margin-left: auto;
+}
+
+.activity-file .btn-icon {
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg) 30%);
+}
+
+.activity-time {
+  color: var(--text3);
+  font-size: .68rem;
+  padding: 0 4px;
+}
+
+.empty-feed {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  color: var(--text3);
+  text-align: center;
+}
+
+.empty-feed i {
+  color: var(--accent);
+  font-size: 2rem;
+}
+
+@media (max-width: 600px) {
+  #mainScreen.active {
+    height: calc(100dvh - 56px);
+    overflow: hidden;
+  }
+
+  #mainScreen > .sync-status {
+    margin: 10px 12px;
+  }
+
+  .status-copy span {
+    white-space: normal;
+  }
+
+  .main-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .conversation-panel {
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
+  }
+
+  .conversation-panel .drop-zone {
+    display: none;
+  }
+
+  #chatArea.chat-area {
+    border-top: 0;
+  }
+
+  #chatArea .chat-header {
+    padding: 10px 12px;
+  }
+
+  #chatArea .chat-messages {
+    padding: 12px;
+    gap: 9px;
+  }
+
+  #chatArea .chat-msg {
+    max-width: 86%;
+  }
+
+  .activity-file {
+    max-width: 90%;
+    min-width: min(260px, 90vw);
+  }
+
+  .activity-file-body {
+    align-items: flex-start;
+  }
+
+  .activity-file .file-actions {
+    flex-direction: row;
+  }
+
+  #chatArea .chat-input-row {
+    padding: 9px 10px calc(76px + env(safe-area-inset-bottom));
   }
 }
 
