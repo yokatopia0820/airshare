@@ -1,37 +1,40 @@
 "use strict";
 
+const DEFAULT_USD_JPY_RATE = 160;
+
 const SOURCES = [
   {
     name: "PriceCharting",
-    role: "主軸",
+    role: "価格主軸",
     url: "https://www.pricecharting.com/category/pokemon-cards",
-    summary: "通常価格、PSA10、売買履歴、同名バリアントの分離に強い。APIは現行価格向けで、履歴は自前保存が必要。"
+    summary: "通常価格、PSA10、売買履歴、同名バリアントの分離に強い。価格はUSD基準なので、この画面では円換算を標準表示にします。"
   },
   {
     name: "TCGdex",
     role: "カード識別",
     url: "https://tcgdex.dev/",
-    summary: "日本語カードのID、セット、ローカル番号、画像URLを取得しやすい。相場は主用途ではない。"
+    summary: "日本語カードのID、セット、ローカル番号、画像URLを確認するために使います。相場は主用途ではありません。"
   },
   {
     name: "PSA APR",
     role: "PSA検算",
     url: "https://www.psacard.com/auctionprices",
-    summary: "PSA鑑定品のオークション実績確認に使う。通常価格は別ソースで確認する。"
+    summary: "PSA鑑定品の落札実績確認に使います。通常価格は別ソースで確認します。"
   },
   {
     name: "magi / Card Rush / TCGPlayer",
     role: "地域検算",
     url: "https://en.magi.camp/categories/200/items",
-    summary: "日本円の販売・買取や出品感を確認する補助。履歴・状態差・送料を混同しない。"
+    summary: "日本円の販売・買取感を補助確認します。状態差、送料、在庫価格を混同しないように扱います。"
   }
 ];
 
 const INITIAL_CARDS = [
   {
     id: "pc:pokemon-base-set:charizard-4:unlimited-holo",
-    displayName: "Charizard",
-    japaneseName: "リザードン",
+    displayName: "リザードン",
+    englishName: "Charizard",
+    aliases: ["charizard", "リザードン", "base set", "ベースセット", "4/102"],
     setName: "Pokemon Base Set",
     setCode: "base1",
     localNumber: "4/102",
@@ -70,13 +73,14 @@ const INITIAL_CARDS = [
     ],
     notes: [
       "Base Set #4は状態差が大きく、通常価格はNear Mintだけではありません。",
-      "PSA10は直近の売買点が少ないため、最新の現行値と過去売買を分けて見る必要があります。"
+      "PSA10は売買点が少ないため、現行値と過去売買を分けて見る必要があります。"
     ]
   },
   {
     id: "pc:jp-sv2a:gengar-094:rare",
     displayName: "ゲンガー",
-    japaneseName: "Gengar",
+    englishName: "Gengar",
+    aliases: ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "通常", "rare"],
     setName: "ポケモンカード151",
     setCode: "SV2a",
     localNumber: "094/165",
@@ -121,7 +125,8 @@ const INITIAL_CARDS = [
   {
     id: "pc:jp-sv2a:gengar-094:master-ball",
     displayName: "ゲンガー",
-    japaneseName: "Gengar",
+    englishName: "Gengar",
+    aliases: ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "マスターボール", "master ball", "masterball", "ミラー"],
     setName: "ポケモンカード151",
     setCode: "SV2a",
     localNumber: "094/165",
@@ -136,7 +141,7 @@ const INITIAL_CARDS = [
     image: {
       url: "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
       verification: "base-art-with-variant-overlay",
-      note: "TCGdexの通常画像にUI上のMaster Ball表示を重ねた仮表示。量産時は相場元または権利確認済みの実写画像に差し替え。"
+      note: "TCGdexの通常画像にMaster Ball表示を重ねた仮表示。正規ミラー実写画像は未検証です。"
     },
     priceSource: {
       name: "PriceCharting",
@@ -161,7 +166,7 @@ const INITIAL_CARDS = [
     ],
     notes: [
       "PriceCharting上で通常ゲンガーとは別ページ、別Product IDです。",
-      "画像は混同防止のためMaster Ballバッジを表示しますが、現時点では正規のミラー実写画像としては未検証です。"
+      "混同防止のためMaster Ballバッジを表示します。画像は正式なミラー実写としては未検証です。"
     ]
   }
 ];
@@ -170,7 +175,8 @@ const state = {
   cards: INITIAL_CARDS,
   selectedId: INITIAL_CARDS[2].id,
   query: "",
-  filter: "all"
+  filter: "all",
+  usdJpyRate: DEFAULT_USD_JPY_RATE
 };
 
 const elements = {};
@@ -184,7 +190,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function cacheElements() {
   elements.cardCount = document.getElementById("cardCount");
+  elements.searchForm = document.getElementById("searchForm");
   elements.searchInput = document.getElementById("searchInput");
+  elements.clearSearch = document.getElementById("clearSearch");
+  elements.searchAssist = document.getElementById("searchAssist");
+  elements.fxRateInput = document.getElementById("fxRateInput");
   elements.cardList = document.getElementById("cardList");
   elements.cardDetail = document.getElementById("cardDetail");
   elements.priceChart = document.getElementById("priceChart");
@@ -195,9 +205,30 @@ function cacheElements() {
 }
 
 function bindEvents() {
+  elements.searchForm.addEventListener("submit", event => {
+    event.preventDefault();
+    state.query = elements.searchInput.value;
+    renderList({ selectFirstMatch: true });
+  });
+
   elements.searchInput.addEventListener("input", event => {
-    state.query = event.target.value.trim().toLowerCase();
-    renderList();
+    state.query = event.target.value;
+    renderList({ selectFirstMatch: true });
+  });
+
+  elements.clearSearch.addEventListener("click", () => {
+    state.query = "";
+    elements.searchInput.value = "";
+    renderList({ selectFirstMatch: false });
+  });
+
+  elements.fxRateInput.addEventListener("input", event => {
+    const nextRate = Number(event.target.value);
+    if (Number.isFinite(nextRate) && nextRate > 0) {
+      state.usdJpyRate = nextRate;
+      renderSelectedCard();
+      renderList({ selectFirstMatch: false });
+    }
   });
 
   document.querySelectorAll(".filter-button").forEach(button => {
@@ -205,7 +236,7 @@ function bindEvents() {
       document.querySelectorAll(".filter-button").forEach(item => item.classList.remove("active"));
       button.classList.add("active");
       state.filter = button.dataset.filter;
-      renderList();
+      renderList({ selectFirstMatch: true });
     });
   });
 
@@ -213,47 +244,92 @@ function bindEvents() {
 }
 
 function render() {
-  renderList();
+  renderList({ selectFirstMatch: false });
   renderSelectedCard();
   renderValidation();
 }
 
-function renderList() {
+function renderList({ selectFirstMatch } = { selectFirstMatch: false }) {
   const cards = filteredCards();
-  elements.cardCount.textContent = String(cards.length);
+  const activeStillVisible = cards.some(card => card.id === state.selectedId);
+  if (selectFirstMatch && cards.length && !activeStillVisible) {
+    state.selectedId = cards[0].id;
+    renderSelectedCard();
+  }
+
+  elements.cardCount.textContent = `${cards.length}件`;
+  elements.searchAssist.innerHTML = searchAssistHtml(cards.length);
   elements.cardList.innerHTML = cards.length
     ? cards.map(cardButtonHtml).join("")
-    : `<div class="empty-state">該当するカードがありません。</div>`;
+    : noMatchHtml();
 
   elements.cardList.querySelectorAll("button[data-card-id]").forEach(button => {
     button.addEventListener("click", () => {
       state.selectedId = button.dataset.cardId;
       renderSelectedCard();
-      renderList();
+      renderList({ selectFirstMatch: false });
     });
   });
 }
 
 function filteredCards() {
+  const query = normalizeSearchText(state.query);
   return state.cards.filter(card => {
-    const queryTarget = [
-      card.displayName,
-      card.japaneseName,
-      card.setName,
-      card.setCode,
-      card.localNumber,
-      card.rarity,
-      card.variant.label,
-      card.variant.code,
-      card.priceSource.productId
-    ].join(" ").toLowerCase();
-    const matchesQuery = !state.query || queryTarget.includes(state.query);
+    const matchesQuery = !query || searchTextForCard(card).includes(query);
     const matchesFilter = state.filter === "all"
       || (state.filter === "standard" && card.variant.mirrorPattern === "none")
       || (state.filter === "mirror" && card.variant.mirrorPattern !== "none")
       || (state.filter === "psa" && Number.isFinite(card.current.psa10));
     return matchesQuery && matchesFilter;
   });
+}
+
+function searchTextForCard(card) {
+  return normalizeSearchText([
+    card.displayName,
+    card.englishName,
+    card.setName,
+    card.setCode,
+    card.localNumber,
+    card.rarity,
+    card.variant.label,
+    card.variant.code,
+    card.variant.mirrorPattern,
+    card.priceSource.productId,
+    ...(card.aliases || [])
+  ].join(" "));
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[・･\s_-]+/g, "")
+    .replace(/[＃#]/g, "");
+}
+
+function searchAssistHtml(matchCount) {
+  const query = state.query.trim();
+  if (!query) return `<span>名前、番号、セット、ミラー種別で検索できます。</span>`;
+  if (matchCount) return `<span>${escapeHtml(query)} に一致する登録カード: ${matchCount}件</span>`;
+  return `<span>${escapeHtml(query)} はまだ登録価格データにありません。外部検索リンクを使ってください。</span>`;
+}
+
+function noMatchHtml() {
+  const query = state.query.trim();
+  if (!query) return `<div class="empty-state">表示できるカードがありません。</div>`;
+  const priceChartingUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
+  const tcgdexSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${query} TCGdex Pokemon card`)}`;
+  return `
+    <div class="external-search-card">
+      <h3>登録データ未ヒット</h3>
+      <p>${escapeHtml(query)} のカードは、この画面の保存済み価格データにはまだありません。</p>
+      <div class="source-link-row">
+        <a class="source-link" href="${escapeAttr(priceChartingUrl)}" target="_blank" rel="noopener noreferrer">PriceChartingで検索</a>
+        <a class="source-link" href="${escapeAttr(tcgdexSearchUrl)}" target="_blank" rel="noopener noreferrer">画像・番号を検索</a>
+      </div>
+    </div>
+  `;
 }
 
 function cardButtonHtml(card) {
@@ -267,8 +343,8 @@ function cardButtonHtml(card) {
         <span class="card-meta">${escapeHtml(card.setCode)} ${escapeHtml(card.localNumber)} / ${escapeHtml(card.rarity)}</span>
         <span class="card-price-line">
           <span class="variant-pill${master}">${escapeHtml(card.variant.label)}</span>
-          <span>通常 ${formatCurrency(card.current.raw, card.current.currency)}</span>
-          <span>PSA10 ${formatCurrency(card.current.psa10, card.current.currency)}</span>
+          <span>通常 ${formatPrice(card.current.raw, card.current.currency)}</span>
+          <span>PSA10 ${formatPrice(card.current.psa10, card.current.currency)}</span>
         </span>
       </span>
     </button>
@@ -317,16 +393,8 @@ function renderDetail(card) {
         </div>
 
         <div class="price-grid">
-          <div class="price-box">
-            <p class="price-label">通常価格</p>
-            <p class="price-value">${formatCurrency(card.current.raw, card.current.currency)}</p>
-            <p class="small-copy">${escapeHtml(card.current.observedAt)} 時点 / ${escapeHtml(card.priceSource.name)}</p>
-          </div>
-          <div class="price-box">
-            <p class="price-label">PSA10</p>
-            <p class="price-value">${formatCurrency(card.current.psa10, card.current.currency)}</p>
-            <p class="small-copy">${escapeHtml(card.current.observedAt)} 時点 / ${escapeHtml(card.priceSource.name)}</p>
-          </div>
+          ${priceBoxHtml("通常価格", card.current.raw, card.current.currency, card)}
+          ${priceBoxHtml("PSA10", card.current.psa10, card.current.currency, card)}
         </div>
 
         <div class="identity-grid">
@@ -342,6 +410,7 @@ function renderDetail(card) {
 
         <div class="notes">
           ${card.notes.map(note => `<p>${escapeHtml(note)}</p>`).join("")}
+          <p>円表示は画面左のレートで換算した概算です。元データは${escapeHtml(card.current.currency)}です。</p>
         </div>
 
         <div class="source-link-row">
@@ -360,6 +429,17 @@ function renderDetail(card) {
       frame?.classList.add("image-missing");
     });
   }
+}
+
+function priceBoxHtml(label, value, currency, card) {
+  return `
+    <div class="price-box">
+      <p class="price-label">${escapeHtml(label)}</p>
+      <p class="price-value">${formatPrice(value, currency)}</p>
+      <p class="price-subvalue">${formatOriginalPrice(value, currency)}</p>
+      <p class="small-copy">${escapeHtml(card.current.observedAt)} 時点 / ${escapeHtml(card.priceSource.name)}</p>
+    </div>
+  `;
 }
 
 function identityRow(label, value) {
@@ -387,15 +467,15 @@ function renderChart(card) {
   const allDates = card.history.map(point => new Date(`${point.date}T00:00:00`).getTime());
   const minDate = Math.min(...allDates);
   const maxDate = Math.max(...allDates);
-  const rawDomain = valueDomain(rawSeries.map(point => point.raw));
-  const psaDomain = valueDomain(psaSeries.map(point => point.psa10));
+  const rawDomain = valueDomain(rawSeries.map(point => toDisplayValue(point.raw, card.current.currency)));
+  const psaDomain = valueDomain(psaSeries.map(point => toDisplayValue(point.psa10, card.current.currency)));
 
   const scaleX = date => {
     if (maxDate === minDate) return (plot.x1 + plot.x2) / 2;
     return plot.x1 + ((new Date(`${date}T00:00:00`).getTime() - minDate) / (maxDate - minDate)) * (plot.x2 - plot.x1);
   };
-  const scaleRawY = value => scaleY(value, rawDomain, plot);
-  const scalePsaY = value => scaleY(value, psaDomain, plot);
+  const scaleRawY = value => scaleY(toDisplayValue(value, card.current.currency), rawDomain, plot);
+  const scalePsaY = value => scaleY(toDisplayValue(value, card.current.currency), psaDomain, plot);
 
   const rawPath = linePath(rawSeries, scaleX, point => scaleRawY(point.raw));
   const psaPath = linePath(psaSeries, scaleX, point => scalePsaY(point.psa10));
@@ -409,8 +489,8 @@ function renderChart(card) {
         const psaValue = psaDomain.min + step * (psaDomain.max - psaDomain.min);
         return `
           <line class="grid-line" x1="${plot.x1}" y1="${y}" x2="${plot.x2}" y2="${y}"></line>
-          <text class="tick-label" x="${plot.x1 - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatCompact(rawValue, card.current.currency))}</text>
-          <text class="tick-label" x="${plot.x2 + 10}" y="${y + 4}">${escapeHtml(formatCompact(psaValue, card.current.currency))}</text>
+          <text class="tick-label" x="${plot.x1 - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatCompactYen(rawValue))}</text>
+          <text class="tick-label" x="${plot.x2 + 10}" y="${y + 4}">${escapeHtml(formatCompactYen(psaValue))}</text>
         `;
       }).join("")}
       <line class="axis-line" x1="${plot.x1}" y1="${plot.y1}" x2="${plot.x1}" y2="${plot.y2}"></line>
@@ -424,8 +504,8 @@ function renderChart(card) {
       <text class="axis-label" x="${plot.x2}" y="18" text-anchor="end">PSA10</text>
       <path class="line-raw" d="${rawPath}"></path>
       <path class="line-psa" d="${psaPath}"></path>
-      ${rawSeries.map(point => `<circle class="point-raw" cx="${scaleX(point.date)}" cy="${scaleRawY(point.raw)}" r="4"><title>${point.date} 通常 ${formatCurrency(point.raw, card.current.currency)}</title></circle>`).join("")}
-      ${psaSeries.map(point => `<circle class="point-psa" cx="${scaleX(point.date)}" cy="${scalePsaY(point.psa10)}" r="4"><title>${point.date} PSA10 ${formatCurrency(point.psa10, card.current.currency)}</title></circle>`).join("")}
+      ${rawSeries.map(point => `<circle class="point-raw" cx="${scaleX(point.date)}" cy="${scaleRawY(point.raw)}" r="4"><title>${point.date} 通常 ${formatPrice(point.raw, card.current.currency)}</title></circle>`).join("")}
+      ${psaSeries.map(point => `<circle class="point-psa" cx="${scaleX(point.date)}" cy="${scalePsaY(point.psa10)}" r="4"><title>${point.date} PSA10 ${formatPrice(point.psa10, card.current.currency)}</title></circle>`).join("")}
     </svg>
   `;
 }
@@ -445,13 +525,18 @@ function renderHistoryTable(card) {
         ${rows.map(point => `
           <tr>
             <td>${escapeHtml(point.date)}</td>
-            <td>${formatCurrency(point.raw, card.current.currency)}</td>
-            <td>${formatCurrency(point.psa10, card.current.currency)}</td>
+            <td>${historyPriceHtml(point.raw, card.current.currency)}</td>
+            <td>${historyPriceHtml(point.psa10, card.current.currency)}</td>
           </tr>
         `).join("")}
       </tbody>
     </table>
   `;
+}
+
+function historyPriceHtml(value, currency) {
+  if (!Number.isFinite(value)) return "-";
+  return `<span class="table-yen">${formatPrice(value, currency)}</span><span class="table-usd">${formatOriginalPrice(value, currency)}</span>`;
 }
 
 function valueDomain(values) {
@@ -584,20 +669,38 @@ async function importCatalog(event) {
   }
 }
 
-function formatCurrency(value, currency) {
-  if (!Number.isFinite(value)) return "-";
+function toDisplayValue(value, currency) {
+  if (!Number.isFinite(value)) return NaN;
+  if ((currency || "USD").toUpperCase() === "JPY") return value;
+  return value * state.usdJpyRate;
+}
+
+function formatPrice(value, currency) {
+  const yenValue = toDisplayValue(value, currency);
+  if (!Number.isFinite(yenValue)) return "-";
+  return new Intl.NumberFormat("ja-JP", {
+    style: "currency",
+    currency: "JPY",
+    maximumFractionDigits: 0
+  }).format(yenValue);
+}
+
+function formatOriginalPrice(value, currency) {
+  if (!Number.isFinite(value)) return "";
+  const code = (currency || "USD").toUpperCase();
+  if (code === "JPY") return "元データ: JPY";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: currency || "USD",
+    currency: code,
     maximumFractionDigits: value >= 1000 ? 0 : 2
   }).format(value);
 }
 
-function formatCompact(value, currency) {
+function formatCompactYen(value) {
   if (!Number.isFinite(value)) return "-";
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat("ja-JP", {
     style: "currency",
-    currency: currency || "USD",
+    currency: "JPY",
     notation: "compact",
     maximumFractionDigits: 1
   }).format(value);

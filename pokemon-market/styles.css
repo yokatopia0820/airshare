@@ -190,6 +190,18 @@ h2 {
   font-weight: 800;
 }
 
+.search-form {
+  display: grid;
+  gap: 8px;
+}
+
+.search-row,
+.rate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .search-input {
   width: 100%;
   min-height: 42px;
@@ -204,6 +216,68 @@ h2 {
 .search-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(22, 127, 111, .16);
+}
+
+.search-button,
+.clear-button {
+  min-height: 42px;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.search-button {
+  flex: 0 0 auto;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  padding: 0 14px;
+}
+
+.clear-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+}
+
+.search-assist {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-size: .8rem;
+  line-height: 1.35;
+}
+
+.fx-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.fx-card p {
+  margin-bottom: 0;
+}
+
+.rate-row {
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: .82rem;
+  font-weight: 800;
+}
+
+.rate-input {
+  width: 92px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 7px 9px;
+  text-align: right;
 }
 
 .filter-row {
@@ -297,6 +371,27 @@ h2 {
   padding: 18px;
   color: var(--muted);
   text-align: center;
+}
+
+.external-search-card {
+  display: grid;
+  gap: 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+}
+
+.external-search-card h3 {
+  margin: 0;
+  font-size: .96rem;
+}
+
+.external-search-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .84rem;
+  line-height: 1.45;
 }
 
 .card-overview {
@@ -405,6 +500,13 @@ h2 {
   margin: 0;
   font-size: 1.45rem;
   font-weight: 900;
+}
+
+.price-subvalue {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 800;
 }
 
 .identity-grid {
@@ -584,6 +686,21 @@ h2 {
   color: var(--muted);
   font-size: .74rem;
   text-transform: uppercase;
+}
+
+.table-yen,
+.table-usd {
+  display: block;
+}
+
+.table-yen {
+  font-weight: 800;
+}
+
+.table-usd {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: .74rem;
 }
 
 .source-panel {
