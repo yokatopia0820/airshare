@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pokemon Card Market Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Pokemon card market board</p>
+      <h1>ポケモンカード相場ビューア</h1>
+    </div>
+    <div class="topbar-actions">
+      <label class="import-button" for="catalogImport">JSONを読み込み</label>
+      <input id="catalogImport" type="file" accept="application/json,.json">
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="catalog-panel" aria-label="カード一覧">
+      <div class="panel-heading">
+        <h2>カード一覧</h2>
+        <span id="cardCount" class="count-pill">0</span>
+      </div>
+      <label class="field-label" for="searchInput">検索</label>
+      <input id="searchInput" class="search-input" type="search" autocomplete="off" placeholder="カード名、番号、ミラー種別">
+
+      <div class="filter-row" aria-label="絞り込み">
+        <button type="button" class="filter-button active" data-filter="all">すべて</button>
+        <button type="button" class="filter-button" data-filter="standard">通常</button>
+        <button type="button" class="filter-button" data-filter="mirror">ミラー</button>
+        <button type="button" class="filter-button" data-filter="psa">PSA10あり</button>
+      </div>
+
+      <div id="cardList" class="card-list"></div>
+    </aside>
+
+    <section class="detail-panel" aria-live="polite">
+      <div id="cardDetail" class="detail-content"></div>
+      <section class="chart-section" aria-labelledby="chartTitle">
+        <div class="section-heading">
+          <div>
+            <h2 id="chartTitle">価格推移</h2>
+            <p>通常価格は左軸、PSA10は右軸で表示します。</p>
+          </div>
+          <div class="legend" aria-label="凡例">
+            <span><i class="legend-line raw"></i>通常価格</span>
+            <span><i class="legend-line psa"></i>PSA10</span>
+          </div>
+        </div>
+        <div id="priceChart" class="chart-wrap"></div>
+        <div id="historyTable" class="history-table-wrap"></div>
+      </section>
+    </section>
+
+    <aside class="source-panel" aria-label="出典と検証">
+      <section class="source-block">
+        <h2>今回の調査結論</h2>
+        <p>
+          主軸は PriceCharting。通常価格、PSA10、売買履歴、同番号の別ミラーを同一画面で確認できます。
+          画像と公式寄りのカード識別子は TCGdex を併用します。
+        </p>
+      </section>
+      <section class="source-block">
+        <h2>分類ルール</h2>
+        <ul class="rule-list">
+          <li>カード名だけで同一扱いにしない。</li>
+          <li>セット、番号、言語、レアリティ、ミラー種別、相場元IDを必須にする。</li>
+          <li>Master Ball、Poke Ball、通常、プロモ、初版は別レコードにする。</li>
+          <li>履歴は取得日と状態を保存し、相場サイトの現行値と混ぜない。</li>
+        </ul>
+      </section>
+      <section class="source-block">
+        <h2>データ検証</h2>
+        <div id="validationList" class="validation-list"></div>
+      </section>
+      <section class="source-block">
+        <h2>ソース候補</h2>
+        <div id="sourceList" class="source-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
