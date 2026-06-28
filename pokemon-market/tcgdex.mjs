@@ -1,5 +1,7 @@
-const API_ROOT = "https://api.tcgdex.net/v2/ja";
-const DEFAULT_LIMIT = 24;
+const API_ROOTS = {
+  ja: "https://api.tcgdex.net/v2/ja",
+  en: "https://api.tcgdex.net/v2/en"
+};
 
 const RARITY_LABELS = new Map([
   ["common", "コモン"],
@@ -13,29 +15,44 @@ const RARITY_LABELS = new Map([
   ["promo", "プロモ"]
 ]);
 
-export function buildTcgdexSearchUrl(query, limit = DEFAULT_LIMIT) {
+export function buildTcgdexSearchUrl(query, language = "ja") {
   const normalizedQuery = String(query ?? "").normalize("NFKC").trim();
   if (!normalizedQuery) throw new Error("検索語を入力してください。");
 
-  const url = new URL(`${API_ROOT}/cards`);
+  const apiRoot = API_ROOTS[language] || API_ROOTS.ja;
+  const url = new URL(`${apiRoot}/cards`);
   if (/^\d{1,4}$/u.test(normalizedQuery)) {
     url.searchParams.set("localId", normalizedQuery.padStart(3, "0"));
   } else {
     url.searchParams.set("name", normalizedQuery);
   }
-  url.searchParams.set("pagination:page", "1");
-  url.searchParams.set("pagination:itemsPerPage", String(clampLimit(limit)));
   return url.toString();
 }
 
-export async function searchTcgdexCards(query, { fetchImpl = fetch, signal, limit = DEFAULT_LIMIT } = {}) {
+export async function searchTcgdexCards(query, { fetchImpl = fetch, signal, pokemonNames = {} } = {}) {
   const directId = tcgdexIdFromQuery(query);
   if (directId) {
     const card = await fetchTcgdexCard(directId, { fetchImpl, signal });
     return card ? [card] : [];
   }
 
-  const response = await fetchImpl(buildTcgdexSearchUrl(query, limit), {
+  const normalizedQuery = String(query ?? "").normalize("NFKC").trim();
+  const searches = [{ language: "ja", query: normalizedQuery }];
+  const englishQuery = englishQueryFor(normalizedQuery, pokemonNames);
+  if (englishQuery) searches.push({ language: "en", query: englishQuery });
+
+  const results = await Promise.allSettled(searches.map(search => (
+    fetchCardsForLanguage(search.query, search.language, { fetchImpl, signal })
+  )));
+  const cards = results
+    .filter(result => result.status === "fulfilled")
+    .flatMap(result => result.value);
+  if (cards.length > 0 || results.some(result => result.status === "fulfilled")) return cards;
+  throw results[0]?.reason || new Error("カード検索に失敗しました");
+}
+
+async function fetchCardsForLanguage(query, language, { fetchImpl, signal }) {
+  const response = await fetchImpl(buildTcgdexSearchUrl(query, language), {
     headers: { Accept: "application/json" },
     signal
   });
@@ -43,23 +60,26 @@ export async function searchTcgdexCards(query, { fetchImpl = fetch, signal, limi
 
   const cards = await response.json();
   if (!Array.isArray(cards)) throw new Error("カード検索の応答形式が不正です。");
-  return cards.slice(0, clampLimit(limit)).map(normalizeTcgdexCard).filter(Boolean);
+  return cards
+    .map(card => normalizeTcgdexCard(card, { language }))
+    .filter(Boolean);
 }
 
-export async function fetchTcgdexCard(id, { fetchImpl = fetch, signal } = {}) {
+export async function fetchTcgdexCard(id, { fetchImpl = fetch, signal, language = "ja" } = {}) {
   const safeId = String(id ?? "").trim();
   if (!/^[a-z0-9-]+$/iu.test(safeId)) return null;
 
-  const response = await fetchImpl(`${API_ROOT}/cards/${encodeURIComponent(safeId)}`, {
+  const apiRoot = API_ROOTS[language] || API_ROOTS.ja;
+  const response = await fetchImpl(`${apiRoot}/cards/${encodeURIComponent(safeId)}`, {
     headers: { Accept: "application/json" },
     signal
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`カード情報の取得に失敗しました (${response.status})`);
-  return normalizeTcgdexCard(await response.json());
+  return normalizeTcgdexCard(await response.json(), { language });
 }
 
-export function normalizeTcgdexCard(card) {
+export function normalizeTcgdexCard(card, { language = "ja" } = {}) {
   if (!card || typeof card !== "object" || !card.id || !card.name) return null;
 
   const setCode = String(card.set?.id || String(card.id).split("-")[0] || "").trim();
@@ -71,15 +91,16 @@ export function normalizeTcgdexCard(card) {
   const market = marketFromPricing(card);
 
   return {
-    id: `tcgdex:${card.id}`,
+    id: language === "en" ? `tcgdex:en:${card.id}` : `tcgdex:${card.id}`,
     tcgdexId: String(card.id),
+    tcgdexLanguage: language,
     displayName: String(card.name),
-    englishName: "",
+    englishName: language === "en" ? String(card.name) : "",
     aliases: [String(card.id), setCode, localId].filter(Boolean),
     setName: String(card.set?.name || setCode),
     setCode,
     localNumber,
-    language: "日本語",
+    language: language === "en" ? "英語" : "日本語",
     rarity: japaneseRarity(card.rarity),
     variant: {
       code: "standard",
@@ -180,6 +201,21 @@ function tcgdexIdFromQuery(query) {
   return match ? `${match[1]}-${match[2].padStart(3, "0")}` : "";
 }
 
+function englishQueryFor(query, pokemonNames) {
+  const normalized = String(query || "").normalize("NFKC").trim();
+  if (!normalized) return "";
+  if (/^[\x20-\x7e]+$/u.test(normalized) && /[a-z0-9]/iu.test(normalized)) return normalized;
+
+  const entries = Object.entries(pokemonNames && typeof pokemonNames === "object" ? pokemonNames : {});
+  const exact = pokemonNames?.[normalized];
+  if (exact) return String(exact);
+
+  entries.sort(([left], [right]) => right.length - left.length);
+  const prefix = entries.find(([japaneseName]) => normalized.startsWith(japaneseName));
+  if (!prefix) return "";
+  return `${prefix[1]}${normalized.slice(prefix[0].length)}`;
+}
+
 function japaneseRarity(value) {
   const rarity = String(value || "").trim();
   return RARITY_LABELS.get(rarity.toLocaleLowerCase("en-US")) || rarity || "レアリティ未登録";
@@ -189,9 +225,4 @@ function imageUrl(value) {
   const url = String(value || "").replace(/\/$/u, "");
   if (!url) return "";
   return /\.(?:avif|jpe?g|png|webp)$/iu.test(url) ? url : `${url}/high.webp`;
-}
-
-function clampLimit(value) {
-  const limit = Number(value);
-  return Number.isInteger(limit) ? Math.min(50, Math.max(1, limit)) : DEFAULT_LIMIT;
 }

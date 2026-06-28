@@ -91,7 +91,13 @@ export function calculateSourcingDecision({ card, purchasePriceJpy, settings, no
   }
 
   const market = card.market;
-  const grossSalesJpy = (market.salePrice + market.buyerShipping) * settings.usdJpyRate;
+  const currency = String(market.currency || "USD").toUpperCase();
+  const jpyRate = currency === "JPY"
+    ? 1
+    : currency === "EUR"
+      ? settings.eurJpyRate
+      : settings.usdJpyRate;
+  const grossSalesJpy = (market.salePrice + market.buyerShipping) * jpyRate;
   const marketplaceFeeJpy = grossSalesJpy * settings.feeRate;
   const fxBufferJpy = grossSalesJpy * settings.fxBufferRate;
   const profitJpy = grossSalesJpy

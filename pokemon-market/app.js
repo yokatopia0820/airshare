@@ -1,23 +1,29 @@
-import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs?v=8";
+import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs?v=11";
 import {
   filterCatalogGroups,
   groupCatalogCards,
   japaneseCondition,
+  japaneseLanguage,
   marketActivityLabel,
   mergeCardCache,
   mergeCatalogGroups,
   shouldRefreshMarket,
   variantQuotesForGroup
-} from "./catalog.mjs?v=8";
-import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs?v=8";
-import { fetchJpyRates } from "./fx.mjs?v=8";
+} from "./catalog.mjs?v=11";
+import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs?v=11";
+import { fetchJpyRates } from "./fx.mjs?v=11";
 import {
   fetchPriceChartingProduct,
   getPriceChartingStatus,
   shouldFetchPriceCharting
-} from "./pricecharting.mjs?v=8";
+} from "./pricecharting.mjs?v=11";
+import {
+  clearSourcingCard,
+  createSourcingFlow,
+  selectSourcingCard,
+  setPurchasePrice
+} from "./flow.mjs?v=11";
 
-const MAX_VISIBLE_RESULTS = 8;
 const SEARCH_DELAY_MS = 450;
 const DEFAULT_USD_JPY_RATE = 160;
 const DEFAULT_EUR_JPY_RATE = 185;
@@ -41,10 +47,10 @@ const DEFAULT_SETTINGS = {
 const state = {
   localCards: [],
   cachedCards: [],
+  pokemonNames: {},
   visibleGroups: [],
   query: "",
-  expandedGroupId: "",
-  purchasePrice: "",
+  flow: createSourcingFlow(),
   settings: { ...DEFAULT_SETTINGS },
   fxDates: { USD: "", EUR: "" },
   fxSource: "初期値",
@@ -72,7 +78,7 @@ async function initializeApp() {
   bindEvents();
   renderSettings();
   renderFxStatus();
-  await loadCatalog();
+  await Promise.all([loadCatalog(), loadPokemonNames()]);
   renderLocalResults();
   void initializePriceCharting();
   void refreshFxRate();
@@ -83,6 +89,11 @@ function cacheElements() {
   elements.searchForm = document.getElementById("searchForm");
   elements.searchInput = document.getElementById("searchInput");
   elements.clearSearch = document.getElementById("clearSearch");
+  elements.selectionPanel = document.getElementById("selectionPanel");
+  elements.selectedCardSummary = document.getElementById("selectedCardSummary");
+  elements.selectedProfit = document.getElementById("selectedProfit");
+  elements.selectedMarket = document.getElementById("selectedMarket");
+  elements.chooseAnother = document.getElementById("chooseAnother");
   elements.purchasePriceInput = document.getElementById("purchasePriceInput");
   elements.searchStatus = document.getElementById("searchStatus");
   elements.cardList = document.getElementById("cardList");
@@ -106,6 +117,7 @@ function bindEvents() {
   });
 
   elements.searchInput.addEventListener("input", event => {
+    resetSelection();
     state.query = event.target.value.trim();
     elements.clearSearch.hidden = !state.query;
     renderLocalResults();
@@ -121,6 +133,7 @@ function bindEvents() {
     state.query = "";
     state.searching = false;
     state.searchError = "";
+    resetSelection();
     elements.searchInput.value = "";
     elements.clearSearch.hidden = true;
     renderLocalResults();
@@ -128,14 +141,22 @@ function bindEvents() {
   });
 
   elements.purchasePriceInput.addEventListener("input", event => {
-    state.purchasePrice = event.target.value;
-    renderResults();
+    state.flow = setPurchasePrice(state.flow, event.target.value);
+    renderSelectedCard();
   });
 
   elements.cardList.addEventListener("click", event => {
-    const toggle = event.target.closest("button[data-group-id]");
-    if (!toggle) return;
-    toggleGroup(toggle.dataset.groupId);
+    const selectButton = event.target.closest("button[data-select-group]");
+    if (!selectButton) return;
+    void selectGroup(selectButton.dataset.selectGroup);
+  });
+
+  elements.chooseAnother.addEventListener("click", () => {
+    const previousGroupId = state.flow.selectedGroupId;
+    resetSelection();
+    renderResults();
+    const previousButton = elements.cardList.querySelector(`[data-select-group="${CSS.escape(previousGroupId)}"]`);
+    previousButton?.focus();
   });
 
   Object.entries(elements.settingsInputs).forEach(([key, input]) => {
@@ -156,6 +177,17 @@ async function loadCatalog() {
   }
 }
 
+async function loadPokemonNames() {
+  try {
+    const response = await fetch("./data/pokemon-names.json", { cache: "force-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const names = await response.json();
+    state.pokemonNames = names && typeof names === "object" ? names : {};
+  } catch {
+    state.pokemonNames = {};
+  }
+}
+
 function applySnapshotDefaults(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return;
   const saved = readJson(SETTINGS_KEY, {});
@@ -171,12 +203,13 @@ function applySnapshotDefaults(snapshot) {
 function renderLocalResults() {
   const searchableCards = state.query ? [...state.localCards, ...state.cachedCards] : state.localCards;
   const localGroups = groupCatalogCards(searchableCards);
-  state.visibleGroups = filterCatalogGroups(localGroups, state.query).slice(0, MAX_VISIBLE_RESULTS);
+  state.visibleGroups = filterCatalogGroups(localGroups, state.query);
   renderResults();
 }
 
 async function searchCards(rawQuery) {
   const query = String(rawQuery || "").normalize("NFKC").trim();
+  resetSelection();
   state.query = query;
   elements.searchInput.value = query;
   elements.clearSearch.hidden = !query;
@@ -195,29 +228,37 @@ async function searchCards(rawQuery) {
   try {
     const remoteCards = await searchTcgdexCards(query, {
       signal: state.searchController.signal,
-      limit: 24
+      pokemonNames: state.pokemonNames
     });
     if (requestId !== state.searchRequestId) return;
     rememberCards(remoteCards);
 
     const localMatches = filterCatalogGroups(groupCatalogCards([...state.localCards, ...state.cachedCards]), query);
-    state.visibleGroups = mergeCatalogGroups(localMatches, remoteCards).slice(0, MAX_VISIBLE_RESULTS);
-    if (!state.visibleGroups.some(group => group.id === state.expandedGroupId)) state.expandedGroupId = "";
+    state.visibleGroups = mergeCatalogGroups(localMatches, remoteCards);
   } catch (error) {
     if (error?.name === "AbortError") return;
     state.searchError = "通信できないため、端末内のカードだけ表示しています";
     const cachedGroups = groupCatalogCards([...state.localCards, ...state.cachedCards]);
-    state.visibleGroups = filterCatalogGroups(cachedGroups, query).slice(0, MAX_VISIBLE_RESULTS);
+    state.visibleGroups = filterCatalogGroups(cachedGroups, query);
   } finally {
     if (requestId === state.searchRequestId) {
       state.searching = false;
       renderResults();
-      void hydrateVisiblePrices(requestId);
     }
   }
 }
 
 function renderResults() {
+  const selected = selectedGroup();
+  elements.selectionPanel.hidden = !selected;
+  elements.cardList.hidden = Boolean(selected);
+
+  if (selected) {
+    elements.searchStatus.textContent = "1枚選択中";
+    renderSelectedCard();
+    return;
+  }
+
   if (state.searching && state.visibleGroups.length === 0) {
     elements.searchStatus.textContent = "検索中";
     elements.cardList.innerHTML = `<div class="loading-row"><span class="loading-dot"></span>カードを検索しています</div>`;
@@ -236,69 +277,85 @@ function renderResults() {
   }
 
   elements.cardList.innerHTML = count
-    ? state.visibleGroups.map(groupCardHtml).join("")
+    ? state.visibleGroups.map(searchResultHtml).join("")
     : `<div class="empty-state">カード名または番号を変えて検索してください</div>`;
 }
 
-function groupCardHtml(group) {
+function searchResultHtml(group) {
   const card = group.primary;
-  const expanded = group.id === state.expandedGroupId;
-  const quotes = variantQuotesForGroup(group);
-  const availableCount = Object.values(quotes).filter(Boolean).length;
-  const loadingPrice = state.priceLoadingIds.has(group.id);
   const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
   return `
-    <article class="result-card${expanded ? " expanded" : ""}" data-result-group="${escapeAttr(group.id)}">
+    <article class="result-card" data-result-group="${escapeAttr(group.id)}">
       <button
         type="button"
-        class="card-toggle"
-        data-group-id="${escapeAttr(group.id)}"
-        aria-expanded="${expanded}"
-        aria-controls="calculator-${escapeAttr(group.id)}"
+        class="card-select"
+        data-select-group="${escapeAttr(group.id)}"
       >
         <span class="card-thumb">${cardImageHtml(card)}</span>
         <span class="card-copy">
           <span class="card-name">${escapeHtml(card.displayName)}</span>
-          <span class="card-meta">${escapeHtml(card.setName || card.setCode)} ${escapeHtml(card.localNumber || "")}${rarity}</span>
-          <span class="price-availability${availableCount ? "" : " none"}">${availableCount ? `${availableCount}種類の価格あり` : loadingPrice ? "価格を取得中" : "価格未登録"}</span>
+          <span class="card-meta">${escapeHtml(card.setName || card.setCode)} ${escapeHtml(card.localNumber || "")}${rarity}・${escapeHtml(japaneseLanguage(card.language))}</span>
         </span>
-        <span class="toggle-mark" aria-hidden="true">⌄</span>
+        <span class="select-mark" aria-hidden="true">›</span>
       </button>
-      <div class="profit-strip" aria-label="種類別利益">
-        ${profitCellsHtml(quotes)}
-      </div>
-      ${expanded ? marketDetailsHtml(group, quotes) : ""}
     </article>
   `;
 }
 
-function profitCellsHtml(quotes) {
+function renderSelectedCard() {
+  const group = selectedGroup();
+  if (!group) return;
+  const card = group.primary;
+  const quotes = variantQuotesForGroup(group);
+  const availableCount = Object.values(quotes).filter(Boolean).length;
+  const loadingPrice = state.priceLoadingIds.has(group.id);
+  const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
+  const availability = loadingPrice
+    ? "価格を取得中"
+    : availableCount
+      ? `${availableCount}種類の価格あり`
+      : "価格未登録";
+
+  elements.selectedCardSummary.innerHTML = `
+    <span class="selected-card-thumb">${cardImageHtml(card)}</span>
+    <span class="card-copy">
+      <span class="card-name">${escapeHtml(card.displayName)}</span>
+      <span class="card-meta">${escapeHtml(card.setName || card.setCode)} ${escapeHtml(card.localNumber || "")}${rarity}・${escapeHtml(japaneseLanguage(card.language))}</span>
+      <span class="price-availability${availableCount ? "" : " none"}">${availability}</span>
+    </span>
+  `;
+  if (document.activeElement !== elements.purchasePriceInput) {
+    elements.purchasePriceInput.value = state.flow.purchasePrice;
+  }
+  elements.selectedProfit.innerHTML = profitCellsHtml(quotes, loadingPrice);
+  elements.selectedMarket.innerHTML = `
+    <div class="variant-list" data-variant-results="${escapeAttr(group.id)}">
+      ${variantDetailsHtml(quotes)}
+    </div>
+  `;
+}
+
+function profitCellsHtml(quotes, loadingPrice = false) {
   return ["normal", "mirror", "psa10"]
-    .map(kind => profitCellHtml(kind, quotes[kind]))
+    .map(kind => profitCellHtml(kind, quotes[kind], loadingPrice))
     .join("");
 }
 
-function profitCellHtml(kind, quote) {
+function profitCellHtml(kind, quote, loadingPrice) {
   const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
   if (!quote) {
-    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>価格未登録</strong></div>`;
+    const unavailableText = loadingPrice ? "価格取得中" : "価格未登録";
+    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>${unavailableText}</strong></div>`;
   }
-  const decision = calculateQuoteDecision(quote, state.purchasePrice);
+  const decision = calculateQuoteDecision(quote, state.flow.purchasePrice);
   if (!decision?.ready) {
-    return `<div class="profit-cell" data-profit-kind="${kind}"><span>${label}</span><strong>店頭価格を入力</strong></div>`;
+    return `<div class="profit-cell" data-profit-kind="${kind}"><span>${label}</span><strong>仕入れ金額を入力</strong></div>`;
   }
   const className = decision.profitJpy >= 0 ? "positive" : "negative";
-  return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>利益 ${formatSignedYen(decision.profitJpy)}</strong></div>`;
-}
-
-function marketDetailsHtml(group, quotes) {
-  return `
-    <div id="calculator-${escapeAttr(group.id)}" class="card-calculator">
-      <div class="variant-list" data-variant-results="${escapeAttr(group.id)}">
-        ${variantDetailsHtml(quotes)}
-      </div>
-    </div>
-  `;
+  const roiText = Number.isFinite(decision.roiRate)
+    ? `ROI ${(decision.roiRate * 100).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}%`
+    : "ROI -";
+  return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>利益 ${formatSignedYen(decision.profitJpy)}</strong><small>${roiText}</small></div>`;
 }
 
 function variantDetailsHtml(quotes) {
@@ -351,28 +408,23 @@ function calculateQuoteDecision(quote, purchaseValue) {
   });
 }
 
-function toggleGroup(groupId) {
-  state.expandedGroupId = state.expandedGroupId === groupId ? "" : groupId;
-  renderResults();
-  const group = state.visibleGroups.find(item => item.id === groupId);
-  if (state.expandedGroupId && needsPriceHydration(group)) {
-    void hydrateGroup(group);
-  }
+function selectedGroup() {
+  return state.visibleGroups.find(group => group.id === state.flow.selectedGroupId) || null;
 }
 
-async function hydrateVisiblePrices(requestId) {
-  const queue = state.visibleGroups
-    .filter(needsPriceHydration)
-    .slice(0, 6);
-  let cursor = 0;
+async function selectGroup(groupId) {
+  const group = state.visibleGroups.find(item => item.id === groupId);
+  if (!group) return;
+  state.flow = selectSourcingCard(state.flow, groupId);
+  elements.purchasePriceInput.value = "";
+  renderResults();
+  elements.purchasePriceInput.focus();
+  if (needsPriceHydration(group)) await hydrateGroup(group);
+}
 
-  const worker = async () => {
-    while (cursor < queue.length && requestId === state.searchRequestId) {
-      const group = queue[cursor++];
-      await hydrateGroup(group, requestId);
-    }
-  };
-  await Promise.all([worker(), worker()]);
+function resetSelection() {
+  state.flow = clearSourcingCard(state.flow);
+  if (elements.purchasePriceInput) elements.purchasePriceInput.value = "";
 }
 
 async function hydrateGroup(group, requestId = state.searchRequestId) {
@@ -384,7 +436,8 @@ async function hydrateGroup(group, requestId = state.searchRequestId) {
     if (detail.tcgdexId && shouldRefreshMarket(detail.market)) {
       try {
         const tcgdexDetail = await fetchTcgdexCard(detail.tcgdexId, {
-          signal: state.searchController?.signal
+          signal: state.searchController?.signal,
+          language: detail.tcgdexLanguage || "ja"
         });
         if (tcgdexDetail) detail = { ...detail, ...tcgdexDetail };
       } catch {
@@ -428,7 +481,6 @@ async function initializePriceCharting() {
   try {
     const status = await getPriceChartingStatus();
     state.priceChartingEnabled = status.enabled;
-    if (status.enabled) void hydrateVisiblePrices(state.searchRequestId);
   } catch {
     state.priceChartingEnabled = false;
   }
@@ -596,7 +648,7 @@ function escapeAttr(value) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js?v=8");
+    await navigator.serviceWorker.register("./sw.js?v=11");
   } catch {
     // The app remains usable online when service worker registration is unavailable.
   }
