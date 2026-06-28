@@ -1,0 +1,23 @@
+{
+  "name": "ポケモンカード仕入れ判定",
+  "short_name": "ポケ仕入れ",
+  "description": "店頭でポケモンカードの参考価格と仕入れ判定を確認するアプリ",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#f7f8fa",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

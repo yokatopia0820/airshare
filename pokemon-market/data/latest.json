@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-27T09:00:00+09:00",
+  "usdJpyRate": 160,
+  "defaults": {
+    "feeRate": 0.15,
+    "internationalShippingJpy": 1200,
+    "packingCostJpy": 100,
+    "fxBufferRate": 0.03,
+    "targetProfitJpy": 1000,
+    "targetRoiRate": 0.3,
+    "maxAgeDays": 14,
+    "minimumSampleCount": 3
+  },
+  "cards": [
+    {
+      "id": "pc:pokemon-base-set:charizard-4:unlimited-holo",
+      "displayName": "リザードン",
+      "englishName": "Charizard",
+      "aliases": ["charizard", "リザードン", "base set", "ベースセット", "4/102"],
+      "setName": "Pokemon Base Set",
+      "setCode": "base1",
+      "localNumber": "4/102",
+      "language": "English",
+      "rarity": "Holo Rare",
+      "variant": {
+        "code": "standard_holo",
+        "label": "通常ホロ",
+        "foil": "Holo",
+        "mirrorPattern": "none"
+      },
+      "image": {
+        "url": "https://images.pokemontcg.io/base1/4_hires.png",
+        "verification": "exact",
+        "note": "Pokemon TCG APIのBase Set #4画像。"
+      },
+      "market": {
+        "source": "PriceCharting market reference",
+        "sourceUrl": "https://www.pricecharting.com/game/pokemon-base-set/charizard-4",
+        "currency": "USD",
+        "salePrice": 356.75,
+        "buyerShipping": 0,
+        "condition": "Ungraded / Mixed conditions",
+        "sampleCount": 1,
+        "observedAt": "2026-06-22",
+        "dataKind": "manual-reference"
+      },
+      "history": [
+        { "date": "2025-05-14", "raw": 665, "psa10": 10000 },
+        { "date": "2025-09-26", "raw": 765, "psa10": 18000 },
+        { "date": "2026-03-24", "raw": 420, "psa10": 13900 },
+        { "date": "2026-06-15", "raw": 419, "psa10": null },
+        { "date": "2026-06-19", "raw": 400, "psa10": null },
+        { "date": "2026-06-21", "raw": 330, "psa10": null },
+        { "date": "2026-06-22", "raw": 356.75, "psa10": 30100 }
+      ]
+    },
+    {
+      "id": "pc:jp-sv2a:gengar-094:rare",
+      "displayName": "ゲンガー",
+      "englishName": "Gengar",
+      "aliases": ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "通常", "rare"],
+      "setName": "ポケモンカード151",
+      "setCode": "SV2a",
+      "localNumber": "094/165",
+      "language": "Japanese",
+      "rarity": "Rare",
+      "variant": {
+        "code": "standard_rare",
+        "label": "通常R",
+        "foil": "None",
+        "mirrorPattern": "none"
+      },
+      "image": {
+        "url": "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
+        "verification": "exact",
+        "note": "TCGdexのSV2a 094基本画像。"
+      },
+      "market": {
+        "source": "PriceCharting market reference",
+        "sourceUrl": "https://www.pricecharting.com/game/pokemon-japanese-scarlet-%26-violet-151/gengar-94",
+        "currency": "USD",
+        "salePrice": 3.56,
+        "buyerShipping": 0,
+        "condition": "Ungraded / Mixed conditions",
+        "sampleCount": 1,
+        "observedAt": "2026-06-22",
+        "dataKind": "manual-reference"
+      },
+      "history": [
+        { "date": "2026-04-29", "raw": 3.8, "psa10": 108 },
+        { "date": "2026-05-08", "raw": 4.7, "psa10": 120.5 },
+        { "date": "2026-05-18", "raw": 3.9, "psa10": 124.48 },
+        { "date": "2026-05-28", "raw": 4, "psa10": null },
+        { "date": "2026-06-10", "raw": 4.99, "psa10": null },
+        { "date": "2026-06-18", "raw": 3.99, "psa10": null },
+        { "date": "2026-06-22", "raw": 3.56, "psa10": 123.49 }
+      ]
+    },
+    {
+      "id": "pc:jp-sv2a:gengar-094:master-ball",
+      "displayName": "ゲンガー",
+      "englishName": "Gengar",
+      "aliases": ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "マスターボール", "master ball", "masterball", "ミラー"],
+      "setName": "ポケモンカード151",
+      "setCode": "SV2a",
+      "localNumber": "094/165",
+      "language": "Japanese",
+      "rarity": "Rare",
+      "variant": {
+        "code": "master_ball_mirror",
+        "label": "マスターボールミラー",
+        "foil": "Reverse Holo",
+        "mirrorPattern": "Master Ball"
+      },
+      "image": {
+        "url": "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
+        "verification": "base-art-with-variant-overlay",
+        "note": "正規ミラー実写画像としては未検証。"
+      },
+      "market": {
+        "source": "PriceCharting market reference",
+        "sourceUrl": "https://www.pricecharting.com/game/pokemon-japanese-scarlet-%26-violet-151/gengar-master-ball-94",
+        "currency": "USD",
+        "salePrice": 580,
+        "buyerShipping": 0,
+        "condition": "Ungraded / Mixed conditions",
+        "sampleCount": 1,
+        "observedAt": "2026-06-22",
+        "dataKind": "manual-reference"
+      },
+      "history": [
+        { "date": "2026-04-19", "raw": 496.9, "psa10": 1075 },
+        { "date": "2026-04-24", "raw": 455, "psa10": 1150 },
+        { "date": "2026-05-07", "raw": 500, "psa10": 1100 },
+        { "date": "2026-05-14", "raw": 616, "psa10": 960 },
+        { "date": "2026-05-30", "raw": 525, "psa10": 910 },
+        { "date": "2026-06-11", "raw": null, "psa10": 1100 },
+        { "date": "2026-06-21", "raw": 669, "psa10": null },
+        { "date": "2026-06-22", "raw": 580, "psa10": 1075 }
+      ]
+    }
+  ]
+}
