@@ -2,109 +2,71 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pokemon Card Market Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f8fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>ポケカ仕入れ判定</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <p class="eyebrow">Pokemon card market board</p>
-      <h1>ポケモンカード相場ビューア</h1>
-    </div>
-    <div class="topbar-actions">
-      <label class="import-button" for="catalogImport">JSONを読み込み</label>
-      <input id="catalogImport" type="file" accept="application/json,.json">
-    </div>
+  <header class="app-header">
+    <h1>ポケカ仕入れ判定</h1>
   </header>
 
-  <main class="workspace">
-    <aside class="catalog-panel" aria-label="カード検索">
-      <div class="panel-heading">
-        <h2>カード検索</h2>
-        <span id="cardCount" class="count-pill">0件</span>
-      </div>
-
-      <form id="searchForm" class="search-form">
-        <label class="field-label" for="searchInput">カード名・番号・レアリティ</label>
+  <main class="app-main">
+    <section class="search-section" aria-labelledby="searchTitle">
+      <h2 id="searchTitle" class="visually-hidden">カード検索</h2>
+      <form id="searchForm" class="search-form" role="search">
+        <label class="visually-hidden" for="searchInput">カード名またはカード番号</label>
         <div class="search-row">
-          <input id="searchInput" class="search-input" type="search" autocomplete="off" placeholder="例: ゲンガー 094 マスターボール">
+          <input
+            id="searchInput"
+            class="search-input"
+            type="search"
+            enterkeyhint="search"
+            autocomplete="off"
+            placeholder="カード名・番号 例: ピカチュウ 025"
+          >
           <button class="search-button" type="submit">検索</button>
         </div>
-        <button id="clearSearch" class="clear-button" type="button">検索をクリア</button>
       </form>
 
-      <div id="searchAssist" class="search-assist" role="status"></div>
-
-      <div class="fx-card">
-        <div>
-          <label class="field-label" for="fxRateInput">円換算レート</label>
-          <p class="small-copy">PriceChartingのUSD価格を概算で円表示します。</p>
-        </div>
-        <div class="rate-row">
-          <span>1ドル</span>
-          <input id="fxRateInput" class="rate-input" type="number" min="1" step="0.1" value="160">
-          <span>円</span>
+      <div class="store-price-row">
+        <label for="purchasePriceInput">店頭価格</label>
+        <div class="store-price-input">
+          <span aria-hidden="true">円</span>
+          <input id="purchasePriceInput" type="number" min="0" step="1" inputmode="numeric" placeholder="500">
         </div>
       </div>
 
-      <div class="filter-row" aria-label="絞り込み">
-        <button type="button" class="filter-button active" data-filter="all">すべて</button>
-        <button type="button" class="filter-button" data-filter="standard">通常</button>
-        <button type="button" class="filter-button" data-filter="mirror">ミラー</button>
-        <button type="button" class="filter-button" data-filter="psa">PSA10あり</button>
+      <div class="result-toolbar">
+        <p id="searchStatus" class="search-status" role="status">カードを検索してください</p>
+        <button id="clearSearch" class="clear-search" type="button" hidden>クリア</button>
       </div>
 
-      <div id="cardList" class="card-list"></div>
-    </aside>
-
-    <section class="detail-panel" aria-live="polite">
-      <div id="cardDetail" class="detail-content"></div>
-      <section class="chart-section" aria-labelledby="chartTitle">
-        <div class="section-heading">
-          <div>
-            <h2 id="chartTitle">価格推移</h2>
-            <p>通常価格とPSA10を円換算で表示します。小さなUSD表示は元データ確認用です。</p>
-          </div>
-          <div class="legend" aria-label="凡例">
-            <span><i class="legend-line raw"></i>通常価格</span>
-            <span><i class="legend-line psa"></i>PSA10</span>
-          </div>
-        </div>
-        <div id="priceChart" class="chart-wrap"></div>
-        <div id="historyTable" class="history-table-wrap"></div>
-      </section>
+      <div id="cardList" class="card-list" aria-live="polite"></div>
     </section>
 
-    <aside class="source-panel" aria-label="出典と分類ルール">
-      <section class="source-block">
-        <h2>相場ソース</h2>
-        <p>
-          価格の主軸はPriceCharting、カード識別と画像はTCGdexやPokemon TCG APIを併用します。
-          同名カードでもセット・番号・ミラー種別・相場元IDが違うものは別カードとして扱います。
-        </p>
-      </section>
-      <section class="source-block">
-        <h2>分類ルール</h2>
-        <ul class="rule-list">
-          <li>カード名だけで同一扱いにしない。</li>
-          <li>セット、番号、言語、レアリティ、ミラー種別、相場元IDを必須にする。</li>
-          <li>Master Ball、Poke Ball、通常、プロモ、初版、別言語は別レコードにする。</li>
-          <li>履歴は取得日と状態を保存し、現行値と混ぜない。</li>
-        </ul>
-      </section>
-      <section class="source-block">
-        <h2>データ検証</h2>
-        <div id="validationList" class="validation-list"></div>
-      </section>
-      <section class="source-block">
-        <h2>外部ソース</h2>
-        <div id="sourceList" class="source-list"></div>
-      </section>
-    </aside>
+    <details class="calculator-settings">
+      <summary>計算設定</summary>
+      <div class="settings-grid">
+        <label>eBay手数料 (%)<input id="feeRateInput" type="number" min="0" max="100" step="0.1"></label>
+        <label>海外送料 (円)<input id="internationalShippingInput" type="number" min="0" step="1"></label>
+        <label>梱包費 (円)<input id="packingCostInput" type="number" min="0" step="1"></label>
+        <label>為替余裕率 (%)<input id="fxBufferRateInput" type="number" min="0" max="100" step="0.1"></label>
+        <label>目標利益 (円)<input id="targetProfitInput" type="number" min="0" step="1"></label>
+        <label>目標ROI (%)<input id="targetRoiInput" type="number" min="0" step="1"></label>
+      </div>
+    </details>
   </main>
 
-  <script src="app.js" defer></script>
+  <footer class="app-footer">
+    <p id="fxStatus" role="status">為替レートを取得中</p>
+  </footer>
+
+  <div id="notification" class="notification" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="app.js?v=8"></script>
 </body>
 </html>

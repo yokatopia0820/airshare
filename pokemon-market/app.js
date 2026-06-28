@@ -1,735 +1,603 @@
-"use strict";
+import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs?v=8";
+import {
+  filterCatalogGroups,
+  groupCatalogCards,
+  japaneseCondition,
+  marketActivityLabel,
+  mergeCardCache,
+  mergeCatalogGroups,
+  shouldRefreshMarket,
+  variantQuotesForGroup
+} from "./catalog.mjs?v=8";
+import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs?v=8";
+import { fetchJpyRates } from "./fx.mjs?v=8";
+import {
+  fetchPriceChartingProduct,
+  getPriceChartingStatus,
+  shouldFetchPriceCharting
+} from "./pricecharting.mjs?v=8";
 
+const MAX_VISIBLE_RESULTS = 8;
+const SEARCH_DELAY_MS = 450;
 const DEFAULT_USD_JPY_RATE = 160;
+const DEFAULT_EUR_JPY_RATE = 185;
+const SETTINGS_KEY = "pokemon-market:store-settings:v2";
+const FX_KEY = "pokemon-market:fx:v2";
+const CARD_CACHE_KEY = "pokemon-market:tcgdex-cache:v1";
 
-const SOURCES = [
-  {
-    name: "PriceCharting",
-    role: "価格主軸",
-    url: "https://www.pricecharting.com/category/pokemon-cards",
-    summary: "通常価格、PSA10、売買履歴、同名バリアントの分離に強い。価格はUSD基準なので、この画面では円換算を標準表示にします。"
-  },
-  {
-    name: "TCGdex",
-    role: "カード識別",
-    url: "https://tcgdex.dev/",
-    summary: "日本語カードのID、セット、ローカル番号、画像URLを確認するために使います。相場は主用途ではありません。"
-  },
-  {
-    name: "PSA APR",
-    role: "PSA検算",
-    url: "https://www.psacard.com/auctionprices",
-    summary: "PSA鑑定品の落札実績確認に使います。通常価格は別ソースで確認します。"
-  },
-  {
-    name: "magi / Card Rush / TCGPlayer",
-    role: "地域検算",
-    url: "https://en.magi.camp/categories/200/items",
-    summary: "日本円の販売・買取感を補助確認します。状態差、送料、在庫価格を混同しないように扱います。"
-  }
-];
-
-const INITIAL_CARDS = [
-  {
-    id: "pc:pokemon-base-set:charizard-4:unlimited-holo",
-    displayName: "リザードン",
-    englishName: "Charizard",
-    aliases: ["charizard", "リザードン", "base set", "ベースセット", "4/102"],
-    setName: "Pokemon Base Set",
-    setCode: "base1",
-    localNumber: "4/102",
-    language: "English",
-    rarity: "Holo Rare",
-    variant: {
-      code: "standard_holo",
-      label: "通常ホロ",
-      foil: "Holo",
-      mirrorPattern: "none"
-    },
-    image: {
-      url: "https://images.pokemontcg.io/base1/4_hires.png",
-      verification: "exact",
-      note: "Pokemon TCG APIのBase Set #4画像。"
-    },
-    priceSource: {
-      name: "PriceCharting",
-      productId: "pokemon-base-set/charizard-4",
-      url: "https://www.pricecharting.com/game/pokemon-base-set/charizard-4"
-    },
-    current: {
-      currency: "USD",
-      raw: 356.75,
-      psa10: 30100,
-      observedAt: "2026-06-22"
-    },
-    history: [
-      { date: "2025-05-14", raw: 665.00, psa10: 10000.00 },
-      { date: "2025-09-26", raw: 765.00, psa10: 18000.00 },
-      { date: "2026-03-24", raw: 420.00, psa10: 13900.00 },
-      { date: "2026-06-15", raw: 419.00, psa10: null },
-      { date: "2026-06-19", raw: 400.00, psa10: null },
-      { date: "2026-06-21", raw: 330.00, psa10: null },
-      { date: "2026-06-22", raw: 356.75, psa10: 30100.00 }
-    ],
-    notes: [
-      "Base Set #4は状態差が大きく、通常価格はNear Mintだけではありません。",
-      "PSA10は売買点が少ないため、現行値と過去売買を分けて見る必要があります。"
-    ]
-  },
-  {
-    id: "pc:jp-sv2a:gengar-094:rare",
-    displayName: "ゲンガー",
-    englishName: "Gengar",
-    aliases: ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "通常", "rare"],
-    setName: "ポケモンカード151",
-    setCode: "SV2a",
-    localNumber: "094/165",
-    language: "Japanese",
-    rarity: "Rare",
-    variant: {
-      code: "standard_rare",
-      label: "通常R",
-      foil: "Rare",
-      mirrorPattern: "none"
-    },
-    image: {
-      url: "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
-      verification: "exact",
-      note: "TCGdexのSV2a-094画像。"
-    },
-    priceSource: {
-      name: "PriceCharting",
-      productId: "pokemon-japanese-scarlet-&-violet-151/gengar-94",
-      url: "https://www.pricecharting.com/game/pokemon-japanese-scarlet-%26-violet-151/gengar-94"
-    },
-    current: {
-      currency: "USD",
-      raw: 3.56,
-      psa10: 123.49,
-      observedAt: "2026-06-22"
-    },
-    history: [
-      { date: "2026-04-29", raw: 3.80, psa10: 108.00 },
-      { date: "2026-05-08", raw: 4.70, psa10: 120.50 },
-      { date: "2026-05-18", raw: 3.90, psa10: 124.48 },
-      { date: "2026-05-28", raw: 4.00, psa10: null },
-      { date: "2026-06-10", raw: 4.99, psa10: null },
-      { date: "2026-06-18", raw: 3.99, psa10: null },
-      { date: "2026-06-22", raw: 3.56, psa10: 123.49 }
-    ],
-    notes: [
-      "同じ094/165でも、Poke Ball PatternやMaster Ball Patternとは別カードとして扱います。",
-      "通常Rの売買履歴にミラー表記が混ざる場合は除外対象にします。"
-    ]
-  },
-  {
-    id: "pc:jp-sv2a:gengar-094:master-ball",
-    displayName: "ゲンガー",
-    englishName: "Gengar",
-    aliases: ["gengar", "ゲンガー", "ポケモンカード151", "sv2a", "094/165", "094", "マスターボール", "master ball", "masterball", "ミラー"],
-    setName: "ポケモンカード151",
-    setCode: "SV2a",
-    localNumber: "094/165",
-    language: "Japanese",
-    rarity: "Rare",
-    variant: {
-      code: "master_ball_mirror",
-      label: "マスターボールミラー",
-      foil: "Reverse Holo",
-      mirrorPattern: "Master Ball"
-    },
-    image: {
-      url: "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
-      verification: "base-art-with-variant-overlay",
-      note: "TCGdexの通常画像にMaster Ball表示を重ねた仮表示。正規ミラー実写画像は未検証です。"
-    },
-    priceSource: {
-      name: "PriceCharting",
-      productId: "pokemon-japanese-scarlet-&-violet-151/gengar-master-ball-94",
-      url: "https://www.pricecharting.com/game/pokemon-japanese-scarlet-%26-violet-151/gengar-master-ball-94"
-    },
-    current: {
-      currency: "USD",
-      raw: 580.00,
-      psa10: 1075.00,
-      observedAt: "2026-06-22"
-    },
-    history: [
-      { date: "2026-04-19", raw: 496.90, psa10: 1075.00 },
-      { date: "2026-04-24", raw: 455.00, psa10: 1150.00 },
-      { date: "2026-05-07", raw: 500.00, psa10: 1100.00 },
-      { date: "2026-05-14", raw: 616.00, psa10: 960.00 },
-      { date: "2026-05-30", raw: 525.00, psa10: 910.00 },
-      { date: "2026-06-11", raw: null, psa10: 1100.00 },
-      { date: "2026-06-21", raw: 669.00, psa10: null },
-      { date: "2026-06-22", raw: 580.00, psa10: 1075.00 }
-    ],
-    notes: [
-      "PriceCharting上で通常ゲンガーとは別ページ、別Product IDです。",
-      "混同防止のためMaster Ballバッジを表示します。画像は正式なミラー実写としては未検証です。"
-    ]
-  }
-];
+const DEFAULT_SETTINGS = {
+  usdJpyRate: DEFAULT_USD_JPY_RATE,
+  eurJpyRate: DEFAULT_EUR_JPY_RATE,
+  feeRate: 0.15,
+  internationalShippingJpy: 1200,
+  packingCostJpy: 100,
+  fxBufferRate: 0.03,
+  targetProfitJpy: 1000,
+  targetRoiRate: 0.3,
+  maxAgeDays: 30,
+  minimumSampleCount: 1
+};
 
 const state = {
-  cards: INITIAL_CARDS,
-  selectedId: INITIAL_CARDS[2].id,
+  localCards: [],
+  cachedCards: [],
+  visibleGroups: [],
   query: "",
-  filter: "all",
-  usdJpyRate: DEFAULT_USD_JPY_RATE
+  expandedGroupId: "",
+  purchasePrice: "",
+  settings: { ...DEFAULT_SETTINGS },
+  fxDates: { USD: "", EUR: "" },
+  fxSource: "初期値",
+  searching: false,
+  searchError: "",
+  searchRequestId: 0,
+  searchTimer: 0,
+  searchController: null,
+  priceLoadingIds: new Set(),
+  priceChartingEnabled: false
 };
 
 const elements = {};
+let notificationTimer = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
-  cacheElements();
-  bindEvents();
-  renderSources();
-  render();
+  void initializeApp();
 });
 
+async function initializeApp() {
+  cacheElements();
+  loadSettings();
+  loadFxCache();
+  loadCardCache();
+  bindEvents();
+  renderSettings();
+  renderFxStatus();
+  await loadCatalog();
+  renderLocalResults();
+  void initializePriceCharting();
+  void refreshFxRate();
+  void registerServiceWorker();
+}
+
 function cacheElements() {
-  elements.cardCount = document.getElementById("cardCount");
   elements.searchForm = document.getElementById("searchForm");
   elements.searchInput = document.getElementById("searchInput");
   elements.clearSearch = document.getElementById("clearSearch");
-  elements.searchAssist = document.getElementById("searchAssist");
-  elements.fxRateInput = document.getElementById("fxRateInput");
+  elements.purchasePriceInput = document.getElementById("purchasePriceInput");
+  elements.searchStatus = document.getElementById("searchStatus");
   elements.cardList = document.getElementById("cardList");
-  elements.cardDetail = document.getElementById("cardDetail");
-  elements.priceChart = document.getElementById("priceChart");
-  elements.historyTable = document.getElementById("historyTable");
-  elements.validationList = document.getElementById("validationList");
-  elements.sourceList = document.getElementById("sourceList");
-  elements.catalogImport = document.getElementById("catalogImport");
+  elements.fxStatus = document.getElementById("fxStatus");
+  elements.notification = document.getElementById("notification");
+  elements.settingsInputs = {
+    feeRate: document.getElementById("feeRateInput"),
+    internationalShippingJpy: document.getElementById("internationalShippingInput"),
+    packingCostJpy: document.getElementById("packingCostInput"),
+    fxBufferRate: document.getElementById("fxBufferRateInput"),
+    targetProfitJpy: document.getElementById("targetProfitInput"),
+    targetRoiRate: document.getElementById("targetRoiInput")
+  };
 }
 
 function bindEvents() {
   elements.searchForm.addEventListener("submit", event => {
     event.preventDefault();
-    state.query = elements.searchInput.value;
-    renderList({ selectFirstMatch: true });
+    clearTimeout(state.searchTimer);
+    void searchCards(elements.searchInput.value);
   });
 
   elements.searchInput.addEventListener("input", event => {
-    state.query = event.target.value;
-    renderList({ selectFirstMatch: true });
+    state.query = event.target.value.trim();
+    elements.clearSearch.hidden = !state.query;
+    renderLocalResults();
+    clearTimeout(state.searchTimer);
+    if (state.query.length >= 2) {
+      state.searchTimer = window.setTimeout(() => void searchCards(state.query), SEARCH_DELAY_MS);
+    }
   });
 
   elements.clearSearch.addEventListener("click", () => {
+    clearTimeout(state.searchTimer);
+    state.searchController?.abort();
     state.query = "";
+    state.searching = false;
+    state.searchError = "";
     elements.searchInput.value = "";
-    renderList({ selectFirstMatch: false });
+    elements.clearSearch.hidden = true;
+    renderLocalResults();
+    elements.searchInput.focus();
   });
 
-  elements.fxRateInput.addEventListener("input", event => {
-    const nextRate = Number(event.target.value);
-    if (Number.isFinite(nextRate) && nextRate > 0) {
-      state.usdJpyRate = nextRate;
-      renderSelectedCard();
-      renderList({ selectFirstMatch: false });
-    }
+  elements.purchasePriceInput.addEventListener("input", event => {
+    state.purchasePrice = event.target.value;
+    renderResults();
   });
 
-  document.querySelectorAll(".filter-button").forEach(button => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".filter-button").forEach(item => item.classList.remove("active"));
-      button.classList.add("active");
-      state.filter = button.dataset.filter;
-      renderList({ selectFirstMatch: true });
-    });
+  elements.cardList.addEventListener("click", event => {
+    const toggle = event.target.closest("button[data-group-id]");
+    if (!toggle) return;
+    toggleGroup(toggle.dataset.groupId);
   });
 
-  elements.catalogImport.addEventListener("change", importCatalog);
+  Object.entries(elements.settingsInputs).forEach(([key, input]) => {
+    input.addEventListener("input", () => updateSetting(key, input.value));
+  });
 }
 
-function render() {
-  renderList({ selectFirstMatch: false });
-  renderSelectedCard();
-  renderValidation();
-}
-
-function renderList({ selectFirstMatch } = { selectFirstMatch: false }) {
-  const cards = filteredCards();
-  const activeStillVisible = cards.some(card => card.id === state.selectedId);
-  if (selectFirstMatch && cards.length && !activeStillVisible) {
-    state.selectedId = cards[0].id;
-    renderSelectedCard();
+async function loadCatalog() {
+  try {
+    const response = await fetch("./data/latest.json", { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snapshot = await response.json();
+    state.localCards = Array.isArray(snapshot.cards) ? snapshot.cards : [];
+    applySnapshotDefaults(snapshot);
+  } catch {
+    state.localCards = [];
+    state.searchError = "同梱価格データを読み込めませんでした";
   }
-
-  elements.cardCount.textContent = `${cards.length}件`;
-  elements.searchAssist.innerHTML = searchAssistHtml(cards.length);
-  elements.cardList.innerHTML = cards.length
-    ? cards.map(cardButtonHtml).join("")
-    : noMatchHtml();
-
-  elements.cardList.querySelectorAll("button[data-card-id]").forEach(button => {
-    button.addEventListener("click", () => {
-      state.selectedId = button.dataset.cardId;
-      renderSelectedCard();
-      renderList({ selectFirstMatch: false });
-    });
-  });
 }
 
-function filteredCards() {
-  const query = normalizeSearchText(state.query);
-  return state.cards.filter(card => {
-    const matchesQuery = !query || searchTextForCard(card).includes(query);
-    const matchesFilter = state.filter === "all"
-      || (state.filter === "standard" && card.variant.mirrorPattern === "none")
-      || (state.filter === "mirror" && card.variant.mirrorPattern !== "none")
-      || (state.filter === "psa" && Number.isFinite(card.current.psa10));
-    return matchesQuery && matchesFilter;
-  });
+function applySnapshotDefaults(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+  const saved = readJson(SETTINGS_KEY, {});
+  const defaults = snapshot.defaults || {};
+  for (const key of Object.keys(DEFAULT_SETTINGS)) {
+    if (key in saved) continue;
+    const value = key === "usdJpyRate" ? snapshot.usdJpyRate : defaults[key];
+    if (Number.isFinite(value)) state.settings[key] = value;
+  }
+  renderSettings();
 }
 
-function searchTextForCard(card) {
-  return normalizeSearchText([
-    card.displayName,
-    card.englishName,
-    card.setName,
-    card.setCode,
-    card.localNumber,
-    card.rarity,
-    card.variant.label,
-    card.variant.code,
-    card.variant.mirrorPattern,
-    card.priceSource.productId,
-    ...(card.aliases || [])
-  ].join(" "));
+function renderLocalResults() {
+  const searchableCards = state.query ? [...state.localCards, ...state.cachedCards] : state.localCards;
+  const localGroups = groupCatalogCards(searchableCards);
+  state.visibleGroups = filterCatalogGroups(localGroups, state.query).slice(0, MAX_VISIBLE_RESULTS);
+  renderResults();
 }
 
-function normalizeSearchText(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[・･\s_-]+/g, "")
-    .replace(/[＃#]/g, "");
-}
-
-function searchAssistHtml(matchCount) {
-  const query = state.query.trim();
-  if (!query) return `<span>名前、番号、セット、ミラー種別で検索できます。</span>`;
-  if (matchCount) return `<span>${escapeHtml(query)} に一致する登録カード: ${matchCount}件</span>`;
-  return `<span>${escapeHtml(query)} はまだ登録価格データにありません。外部検索リンクを使ってください。</span>`;
-}
-
-function noMatchHtml() {
-  const query = state.query.trim();
-  if (!query) return `<div class="empty-state">表示できるカードがありません。</div>`;
-  const priceChartingUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(query)}&type=prices`;
-  const tcgdexSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${query} TCGdex Pokemon card`)}`;
-  return `
-    <div class="external-search-card">
-      <h3>登録データ未ヒット</h3>
-      <p>${escapeHtml(query)} のカードは、この画面の保存済み価格データにはまだありません。</p>
-      <div class="source-link-row">
-        <a class="source-link" href="${escapeAttr(priceChartingUrl)}" target="_blank" rel="noopener noreferrer">PriceChartingで検索</a>
-        <a class="source-link" href="${escapeAttr(tcgdexSearchUrl)}" target="_blank" rel="noopener noreferrer">画像・番号を検索</a>
-      </div>
-    </div>
-  `;
-}
-
-function cardButtonHtml(card) {
-  const active = card.id === state.selectedId ? " active" : "";
-  const master = card.variant.code.includes("master") ? " master" : "";
-  return `
-    <button type="button" class="card-button${active}" data-card-id="${escapeAttr(card.id)}">
-      <span class="thumb">${thumbnailHtml(card)}</span>
-      <span>
-        <span class="card-title">${escapeHtml(card.displayName)}</span>
-        <span class="card-meta">${escapeHtml(card.setCode)} ${escapeHtml(card.localNumber)} / ${escapeHtml(card.rarity)}</span>
-        <span class="card-price-line">
-          <span class="variant-pill${master}">${escapeHtml(card.variant.label)}</span>
-          <span>通常 ${formatPrice(card.current.raw, card.current.currency)}</span>
-          <span>PSA10 ${formatPrice(card.current.psa10, card.current.currency)}</span>
-        </span>
-      </span>
-    </button>
-  `;
-}
-
-function thumbnailHtml(card) {
-  const imageUrl = safeUrl(card.image.url);
-  if (!imageUrl) return "NO IMG";
-  return `<img src="${escapeAttr(imageUrl)}" alt="" loading="lazy">`;
-}
-
-function renderSelectedCard() {
-  const selected = state.cards.find(card => card.id === state.selectedId) || state.cards[0];
-  if (!selected) {
-    elements.cardDetail.innerHTML = `<div class="empty-state">表示できるカードがありません。</div>`;
-    elements.priceChart.innerHTML = "";
-    elements.historyTable.innerHTML = "";
+async function searchCards(rawQuery) {
+  const query = String(rawQuery || "").normalize("NFKC").trim();
+  state.query = query;
+  elements.searchInput.value = query;
+  elements.clearSearch.hidden = !query;
+  if (!query) {
+    renderLocalResults();
     return;
   }
-  state.selectedId = selected.id;
-  renderDetail(selected);
-  renderChart(selected);
-  renderHistoryTable(selected);
+
+  const requestId = ++state.searchRequestId;
+  state.searchController?.abort();
+  state.searchController = new AbortController();
+  state.searching = true;
+  state.searchError = "";
+  renderResults();
+
+  try {
+    const remoteCards = await searchTcgdexCards(query, {
+      signal: state.searchController.signal,
+      limit: 24
+    });
+    if (requestId !== state.searchRequestId) return;
+    rememberCards(remoteCards);
+
+    const localMatches = filterCatalogGroups(groupCatalogCards([...state.localCards, ...state.cachedCards]), query);
+    state.visibleGroups = mergeCatalogGroups(localMatches, remoteCards).slice(0, MAX_VISIBLE_RESULTS);
+    if (!state.visibleGroups.some(group => group.id === state.expandedGroupId)) state.expandedGroupId = "";
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    state.searchError = "通信できないため、端末内のカードだけ表示しています";
+    const cachedGroups = groupCatalogCards([...state.localCards, ...state.cachedCards]);
+    state.visibleGroups = filterCatalogGroups(cachedGroups, query).slice(0, MAX_VISIBLE_RESULTS);
+  } finally {
+    if (requestId === state.searchRequestId) {
+      state.searching = false;
+      renderResults();
+      void hydrateVisiblePrices(requestId);
+    }
+  }
 }
 
-function renderDetail(card) {
-  const masterClass = card.variant.code.includes("master") ? " master" : "";
-  const imageClass = card.variant.code.includes("master") ? " card-image foil-master" : " card-image";
-  const imageUrl = safeUrl(card.image.url);
-  const priceUrl = safeUrl(card.priceSource.url);
-  elements.cardDetail.innerHTML = `
-    <article class="card-overview">
-      <div class="${imageClass.trim()}">
-        ${imageUrl ? `<img id="mainCardImage" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(card.displayName)} ${escapeAttr(card.localNumber)}">` : ""}
-        <div class="image-fallback">画像未設定</div>
-        <span class="image-badge">${escapeHtml(card.image.note)}</span>
+function renderResults() {
+  if (state.searching && state.visibleGroups.length === 0) {
+    elements.searchStatus.textContent = "検索中";
+    elements.cardList.innerHTML = `<div class="loading-row"><span class="loading-dot"></span>カードを検索しています</div>`;
+    return;
+  }
+
+  const count = state.visibleGroups.length;
+  if (state.searchError) {
+    elements.searchStatus.textContent = state.searchError;
+  } else if (state.searching) {
+    elements.searchStatus.textContent = `${count}件表示・検索中`;
+  } else if (state.query) {
+    elements.searchStatus.textContent = count ? `${count}件表示` : "一致するカードがありません";
+  } else {
+    elements.searchStatus.textContent = count ? "最近の価格データ" : "カードを検索してください";
+  }
+
+  elements.cardList.innerHTML = count
+    ? state.visibleGroups.map(groupCardHtml).join("")
+    : `<div class="empty-state">カード名または番号を変えて検索してください</div>`;
+}
+
+function groupCardHtml(group) {
+  const card = group.primary;
+  const expanded = group.id === state.expandedGroupId;
+  const quotes = variantQuotesForGroup(group);
+  const availableCount = Object.values(quotes).filter(Boolean).length;
+  const loadingPrice = state.priceLoadingIds.has(group.id);
+  const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
+  return `
+    <article class="result-card${expanded ? " expanded" : ""}" data-result-group="${escapeAttr(group.id)}">
+      <button
+        type="button"
+        class="card-toggle"
+        data-group-id="${escapeAttr(group.id)}"
+        aria-expanded="${expanded}"
+        aria-controls="calculator-${escapeAttr(group.id)}"
+      >
+        <span class="card-thumb">${cardImageHtml(card)}</span>
+        <span class="card-copy">
+          <span class="card-name">${escapeHtml(card.displayName)}</span>
+          <span class="card-meta">${escapeHtml(card.setName || card.setCode)} ${escapeHtml(card.localNumber || "")}${rarity}</span>
+          <span class="price-availability${availableCount ? "" : " none"}">${availableCount ? `${availableCount}種類の価格あり` : loadingPrice ? "価格を取得中" : "価格未登録"}</span>
+        </span>
+        <span class="toggle-mark" aria-hidden="true">⌄</span>
+      </button>
+      <div class="profit-strip" aria-label="種類別利益">
+        ${profitCellsHtml(quotes)}
       </div>
-      <div class="detail-main">
-        <div class="title-row">
-          <div>
-            <h2 class="detail-title">${escapeHtml(card.displayName)}</h2>
-            <p class="detail-subtitle">${escapeHtml(card.setName)} / ${escapeHtml(card.localNumber)} / ${escapeHtml(card.language)}</p>
-          </div>
-          <span class="variant-pill${masterClass}">${escapeHtml(card.variant.label)}</span>
-        </div>
-
-        <div class="price-grid">
-          ${priceBoxHtml("通常価格", card.current.raw, card.current.currency, card)}
-          ${priceBoxHtml("PSA10", card.current.psa10, card.current.currency, card)}
-        </div>
-
-        <div class="identity-grid">
-          ${identityRow("正規キー", card.id)}
-          ${identityRow("相場元ID", card.priceSource.productId)}
-          ${identityRow("セット", `${card.setName} (${card.setCode})`)}
-          ${identityRow("番号", card.localNumber)}
-          ${identityRow("レアリティ", card.rarity)}
-          ${identityRow("ミラー種別", card.variant.mirrorPattern)}
-          ${identityRow("画像検証", card.image.verification)}
-          ${identityRow("状態", card.variant.foil)}
-        </div>
-
-        <div class="notes">
-          ${card.notes.map(note => `<p>${escapeHtml(note)}</p>`).join("")}
-          <p>円表示は画面左のレートで換算した概算です。元データは${escapeHtml(card.current.currency)}です。</p>
-        </div>
-
-        <div class="source-link-row">
-          ${priceUrl ? `<a class="source-link" href="${escapeAttr(priceUrl)}" target="_blank" rel="noopener noreferrer">PriceChartingを開く</a>` : ""}
-          ${imageUrl ? `<a class="source-link" href="${escapeAttr(imageUrl)}" target="_blank" rel="noopener noreferrer">画像URLを開く</a>` : ""}
-        </div>
-      </div>
+      ${expanded ? marketDetailsHtml(group, quotes) : ""}
     </article>
   `;
-
-  const image = document.getElementById("mainCardImage");
-  if (image) {
-    image.addEventListener("error", () => {
-      image.remove();
-      const frame = elements.cardDetail.querySelector(".card-image");
-      frame?.classList.add("image-missing");
-    });
-  }
 }
 
-function priceBoxHtml(label, value, currency, card) {
+function profitCellsHtml(quotes) {
+  return ["normal", "mirror", "psa10"]
+    .map(kind => profitCellHtml(kind, quotes[kind]))
+    .join("");
+}
+
+function profitCellHtml(kind, quote) {
+  const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
+  if (!quote) {
+    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>価格未登録</strong></div>`;
+  }
+  const decision = calculateQuoteDecision(quote, state.purchasePrice);
+  if (!decision?.ready) {
+    return `<div class="profit-cell" data-profit-kind="${kind}"><span>${label}</span><strong>店頭価格を入力</strong></div>`;
+  }
+  const className = decision.profitJpy >= 0 ? "positive" : "negative";
+  return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>利益 ${formatSignedYen(decision.profitJpy)}</strong></div>`;
+}
+
+function marketDetailsHtml(group, quotes) {
   return `
-    <div class="price-box">
-      <p class="price-label">${escapeHtml(label)}</p>
-      <p class="price-value">${formatPrice(value, currency)}</p>
-      <p class="price-subvalue">${formatOriginalPrice(value, currency)}</p>
-      <p class="small-copy">${escapeHtml(card.current.observedAt)} 時点 / ${escapeHtml(card.priceSource.name)}</p>
-    </div>
-  `;
-}
-
-function identityRow(label, value) {
-  return `<div class="identity-row"><span>${escapeHtml(label)}</span><span>${escapeHtml(value || "-")}</span></div>`;
-}
-
-function renderChart(card) {
-  const rawSeries = card.history.filter(point => Number.isFinite(point.raw));
-  const psaSeries = card.history.filter(point => Number.isFinite(point.psa10));
-  if (rawSeries.length < 2 && psaSeries.length < 2) {
-    elements.priceChart.innerHTML = `<div class="empty-state">線グラフに必要な履歴が不足しています。</div>`;
-    return;
-  }
-
-  const width = 820;
-  const height = 320;
-  const pad = { top: 24, right: 82, bottom: 48, left: 82 };
-  const plot = {
-    x1: pad.left,
-    x2: width - pad.right,
-    y1: pad.top,
-    y2: height - pad.bottom
-  };
-
-  const allDates = card.history.map(point => new Date(`${point.date}T00:00:00`).getTime());
-  const minDate = Math.min(...allDates);
-  const maxDate = Math.max(...allDates);
-  const rawDomain = valueDomain(rawSeries.map(point => toDisplayValue(point.raw, card.current.currency)));
-  const psaDomain = valueDomain(psaSeries.map(point => toDisplayValue(point.psa10, card.current.currency)));
-
-  const scaleX = date => {
-    if (maxDate === minDate) return (plot.x1 + plot.x2) / 2;
-    return plot.x1 + ((new Date(`${date}T00:00:00`).getTime() - minDate) / (maxDate - minDate)) * (plot.x2 - plot.x1);
-  };
-  const scaleRawY = value => scaleY(toDisplayValue(value, card.current.currency), rawDomain, plot);
-  const scalePsaY = value => scaleY(toDisplayValue(value, card.current.currency), psaDomain, plot);
-
-  const rawPath = linePath(rawSeries, scaleX, point => scaleRawY(point.raw));
-  const psaPath = linePath(psaSeries, scaleX, point => scalePsaY(point.psa10));
-  const xTicks = dateTicks(card.history);
-
-  elements.priceChart.innerHTML = `
-    <svg class="price-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(card.displayName)}の通常価格とPSA10価格推移">
-      ${[0, .25, .5, .75, 1].map(step => {
-        const y = plot.y2 - step * (plot.y2 - plot.y1);
-        const rawValue = rawDomain.min + step * (rawDomain.max - rawDomain.min);
-        const psaValue = psaDomain.min + step * (psaDomain.max - psaDomain.min);
-        return `
-          <line class="grid-line" x1="${plot.x1}" y1="${y}" x2="${plot.x2}" y2="${y}"></line>
-          <text class="tick-label" x="${plot.x1 - 10}" y="${y + 4}" text-anchor="end">${escapeHtml(formatCompactYen(rawValue))}</text>
-          <text class="tick-label" x="${plot.x2 + 10}" y="${y + 4}">${escapeHtml(formatCompactYen(psaValue))}</text>
-        `;
-      }).join("")}
-      <line class="axis-line" x1="${plot.x1}" y1="${plot.y1}" x2="${plot.x1}" y2="${plot.y2}"></line>
-      <line class="axis-line" x1="${plot.x2}" y1="${plot.y1}" x2="${plot.x2}" y2="${plot.y2}"></line>
-      <line class="axis-line" x1="${plot.x1}" y1="${plot.y2}" x2="${plot.x2}" y2="${plot.y2}"></line>
-      ${xTicks.map(point => {
-        const x = scaleX(point.date);
-        return `<text class="tick-label" x="${x}" y="${height - 18}" text-anchor="middle">${escapeHtml(shortDate(point.date))}</text>`;
-      }).join("")}
-      <text class="axis-label" x="${plot.x1}" y="18">通常価格</text>
-      <text class="axis-label" x="${plot.x2}" y="18" text-anchor="end">PSA10</text>
-      <path class="line-raw" d="${rawPath}"></path>
-      <path class="line-psa" d="${psaPath}"></path>
-      ${rawSeries.map(point => `<circle class="point-raw" cx="${scaleX(point.date)}" cy="${scaleRawY(point.raw)}" r="4"><title>${point.date} 通常 ${formatPrice(point.raw, card.current.currency)}</title></circle>`).join("")}
-      ${psaSeries.map(point => `<circle class="point-psa" cx="${scaleX(point.date)}" cy="${scalePsaY(point.psa10)}" r="4"><title>${point.date} PSA10 ${formatPrice(point.psa10, card.current.currency)}</title></circle>`).join("")}
-    </svg>
-  `;
-}
-
-function renderHistoryTable(card) {
-  const rows = [...card.history].sort((a, b) => b.date.localeCompare(a.date));
-  elements.historyTable.innerHTML = `
-    <table class="history-table">
-      <thead>
-        <tr>
-          <th>日付</th>
-          <th>通常価格</th>
-          <th>PSA10</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(point => `
-          <tr>
-            <td>${escapeHtml(point.date)}</td>
-            <td>${historyPriceHtml(point.raw, card.current.currency)}</td>
-            <td>${historyPriceHtml(point.psa10, card.current.currency)}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
-}
-
-function historyPriceHtml(value, currency) {
-  if (!Number.isFinite(value)) return "-";
-  return `<span class="table-yen">${formatPrice(value, currency)}</span><span class="table-usd">${formatOriginalPrice(value, currency)}</span>`;
-}
-
-function valueDomain(values) {
-  const finite = values.filter(Number.isFinite);
-  if (!finite.length) return { min: 0, max: 1 };
-  let min = Math.min(...finite);
-  let max = Math.max(...finite);
-  if (min === max) {
-    min = Math.max(0, min - 1);
-    max += 1;
-  }
-  const padding = (max - min) * .12;
-  return { min: Math.max(0, min - padding), max: max + padding };
-}
-
-function scaleY(value, domain, plot) {
-  return plot.y2 - ((value - domain.min) / (domain.max - domain.min)) * (plot.y2 - plot.y1);
-}
-
-function linePath(series, scaleX, scaleYForPoint) {
-  return series
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((point, index) => {
-      const command = index === 0 ? "M" : "L";
-      return `${command} ${scaleX(point.date).toFixed(1)} ${scaleYForPoint(point).toFixed(1)}`;
-    })
-    .join(" ");
-}
-
-function dateTicks(history) {
-  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  if (sorted.length <= 3) return sorted;
-  return [sorted[0], sorted[Math.floor(sorted.length / 2)], sorted[sorted.length - 1]];
-}
-
-function renderValidation() {
-  const results = validateCards(state.cards);
-  elements.validationList.innerHTML = results.map(item => `
-    <div class="validation-item ${item.level}">
-      <div class="validation-title">${escapeHtml(item.title)}</div>
-      <div class="validation-copy">${escapeHtml(item.copy)}</div>
-    </div>
-  `).join("");
-}
-
-function validateCards(cards) {
-  const results = [];
-  const ids = new Set();
-  const identityKeys = new Set();
-  let duplicateIdCount = 0;
-  let duplicateIdentityCount = 0;
-  let imageWarnings = 0;
-  let missingHistory = 0;
-
-  cards.forEach(card => {
-    if (ids.has(card.id)) duplicateIdCount += 1;
-    ids.add(card.id);
-
-    const identityKey = [
-      card.setCode,
-      card.localNumber,
-      card.language,
-      card.rarity,
-      card.variant?.code,
-      card.priceSource?.productId
-    ].join("|");
-    if (identityKeys.has(identityKey)) duplicateIdentityCount += 1;
-    identityKeys.add(identityKey);
-
-    if (!card.image?.url || card.image.verification !== "exact") imageWarnings += 1;
-    if (!Array.isArray(card.history) || card.history.length < 2) missingHistory += 1;
-  });
-
-  results.push({
-    level: duplicateIdCount ? "warn" : "good",
-    title: "正規キー重複",
-    copy: duplicateIdCount ? `${duplicateIdCount}件のID重複があります。` : "ID重複はありません。"
-  });
-  results.push({
-    level: duplicateIdentityCount ? "warn" : "good",
-    title: "バリアント分類",
-    copy: duplicateIdentityCount ? `${duplicateIdentityCount}件の分類衝突があります。` : "セット、番号、言語、レアリティ、ミラー種別、相場元IDで分離済みです。"
-  });
-  results.push({
-    level: imageWarnings ? "warn" : "good",
-    title: "画像検証",
-    copy: imageWarnings ? `${imageWarnings}件は完全な実写/ミラー画像として未検証です。` : "全カードの画像がexact扱いです。"
-  });
-  results.push({
-    level: missingHistory ? "warn" : "good",
-    title: "履歴データ",
-    copy: missingHistory ? `${missingHistory}件は線グラフに必要な履歴が不足しています。` : "全カードに複数時点の履歴があります。"
-  });
-
-  return results;
-}
-
-function renderSources() {
-  elements.sourceList.innerHTML = SOURCES.map(source => `
-    <div class="source-card">
-      <div>
-        <h3>${escapeHtml(source.name)} <span class="status-pill">${escapeHtml(source.role)}</span></h3>
-        <div class="source-copy">${escapeHtml(source.summary)}</div>
+    <div id="calculator-${escapeAttr(group.id)}" class="card-calculator">
+      <div class="variant-list" data-variant-results="${escapeAttr(group.id)}">
+        ${variantDetailsHtml(quotes)}
       </div>
-      <a href="${escapeAttr(safeUrl(source.url))}" target="_blank" rel="noopener noreferrer">開く</a>
     </div>
-  `).join("");
+  `;
 }
 
-async function importCatalog(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
+function variantDetailsHtml(quotes) {
+  return ["normal", "mirror", "psa10"]
+    .map(kind => variantDetailHtml(kind, quotes[kind]))
+    .join("");
+}
 
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const cards = Array.isArray(parsed) ? parsed : parsed.cards;
-    if (!Array.isArray(cards)) {
-      throw new Error("JSONは配列、または { cards: [...] } 形式にしてください。");
-    }
-    state.cards = cards;
-    state.selectedId = cards[0]?.id || "";
-    state.query = "";
-    elements.searchInput.value = "";
-    render();
-  } catch (error) {
-    alert(`読み込みに失敗しました: ${error.message}`);
-  } finally {
-    event.target.value = "";
+function variantDetailHtml(kind, quote) {
+  const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
+  if (!quote) {
+    return `
+      <div class="variant-row unavailable" data-variant="${kind}">
+        <strong class="variant-name">${label}</strong>
+        <span class="unavailable-copy">価格未登録</span>
+      </div>
+    `;
+  }
+
+  const market = quote.market;
+  const saleJpy = toYen(market.salePrice, market.currency);
+  const shippingJpy = toYen(market.buyerShipping, market.currency);
+  const shippingText = ["market-average", "market-reference"].includes(market.dataKind)
+    ? "送料収入なしで計算"
+    : `送料 ${formatYen(shippingJpy)}`;
+  const activityHtml = market.dataKind === "sold-comparable"
+    ? `直近1か月 <strong>${formatInteger(market.sampleCount)}件</strong>売れています`
+    : escapeHtml(marketActivityLabel(market));
+
+  return `
+    <div class="variant-row" data-variant="${kind}">
+      <strong class="variant-name">${label}</strong>
+      <div class="variant-facts">
+        <span class="sale-line">販売 ${formatYen(saleJpy)}・${shippingText}</span>
+        <span class="sold-line">${activityHtml}</span>
+        <span class="condition-line">${escapeHtml(japaneseCondition(market.condition))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function calculateQuoteDecision(quote, purchaseValue) {
+  const validation = validatePurchasePrice(purchaseValue);
+  if (!quote || !validation.ok) return null;
+  return calculateSourcingDecision({
+    card: { ...quote.card, market: quote.market },
+    purchasePriceJpy: validation.value,
+    settings: state.settings,
+    now: new Date().toISOString()
+  });
+}
+
+function toggleGroup(groupId) {
+  state.expandedGroupId = state.expandedGroupId === groupId ? "" : groupId;
+  renderResults();
+  const group = state.visibleGroups.find(item => item.id === groupId);
+  if (state.expandedGroupId && needsPriceHydration(group)) {
+    void hydrateGroup(group);
   }
 }
 
-function toDisplayValue(value, currency) {
-  if (!Number.isFinite(value)) return NaN;
-  if ((currency || "USD").toUpperCase() === "JPY") return value;
-  return value * state.usdJpyRate;
+async function hydrateVisiblePrices(requestId) {
+  const queue = state.visibleGroups
+    .filter(needsPriceHydration)
+    .slice(0, 6);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < queue.length && requestId === state.searchRequestId) {
+      const group = queue[cursor++];
+      await hydrateGroup(group, requestId);
+    }
+  };
+  await Promise.all([worker(), worker()]);
 }
 
-function formatPrice(value, currency) {
-  const yenValue = toDisplayValue(value, currency);
-  if (!Number.isFinite(yenValue)) return "-";
-  return new Intl.NumberFormat("ja-JP", {
-    style: "currency",
-    currency: "JPY",
-    maximumFractionDigits: 0
-  }).format(yenValue);
-}
-
-function formatOriginalPrice(value, currency) {
-  if (!Number.isFinite(value)) return "";
-  const code = (currency || "USD").toUpperCase();
-  if (code === "JPY") return "元データ: JPY";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: code,
-    maximumFractionDigits: value >= 1000 ? 0 : 2
-  }).format(value);
-}
-
-function formatCompactYen(value) {
-  if (!Number.isFinite(value)) return "-";
-  return new Intl.NumberFormat("ja-JP", {
-    style: "currency",
-    currency: "JPY",
-    notation: "compact",
-    maximumFractionDigits: 1
-  }).format(value);
-}
-
-function shortDate(value) {
-  const date = new Date(`${value}T00:00:00`);
-  return new Intl.DateTimeFormat("ja-JP", { month: "2-digit", day: "2-digit" }).format(date);
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function escapeAttr(value) {
-  return escapeHtml(value).replace(/`/g, "&#096;");
-}
-
-function safeUrl(value) {
+async function hydrateGroup(group, requestId = state.searchRequestId) {
+  if (state.priceLoadingIds.has(group.id)) return;
+  state.priceLoadingIds.add(group.id);
+  renderResults();
   try {
-    const url = new URL(String(value || ""), location.href);
-    if (url.protocol === "http:" || url.protocol === "https:") return url.href;
+    let detail = group.primary;
+    if (detail.tcgdexId && shouldRefreshMarket(detail.market)) {
+      try {
+        const tcgdexDetail = await fetchTcgdexCard(detail.tcgdexId, {
+          signal: state.searchController?.signal
+        });
+        if (tcgdexDetail) detail = { ...detail, ...tcgdexDetail };
+      } catch {
+        // Brief search data remains usable when the detail request fails.
+      }
+    }
+    if (requestId !== state.searchRequestId) return;
+
+    if (shouldFetchPriceCharting(detail, state.priceChartingEnabled)) {
+      try {
+        detail = await fetchPriceChartingProduct(detail) || detail;
+      } catch {
+        // Existing market data remains usable when optional pricing fails.
+      }
+    }
+    if (requestId !== state.searchRequestId) return;
+    updateGroupCard(group, detail);
+    rememberCards([detail]);
+  } finally {
+    state.priceLoadingIds.delete(group.id);
+    if (requestId === state.searchRequestId) renderResults();
+  }
+}
+
+function needsPriceHydration(group) {
+  const card = group?.primary;
+  return Boolean(
+    card?.tcgdexId && shouldRefreshMarket(card.market)
+    || shouldFetchPriceCharting(card, state.priceChartingEnabled)
+  );
+}
+
+function updateGroupCard(group, card) {
+  group.primary = card;
+  const existingIndex = group.cards.findIndex(item => item.id === card.id);
+  if (existingIndex >= 0) group.cards[existingIndex] = card;
+  else group.cards.push(card);
+}
+
+async function initializePriceCharting() {
+  try {
+    const status = await getPriceChartingStatus();
+    state.priceChartingEnabled = status.enabled;
+    if (status.enabled) void hydrateVisiblePrices(state.searchRequestId);
+  } catch {
+    state.priceChartingEnabled = false;
+  }
+}
+
+async function refreshFxRate() {
+  try {
+    const result = await fetchJpyRates();
+    state.settings.usdJpyRate = result.USD.rate;
+    state.settings.eurJpyRate = result.EUR.rate;
+    state.fxDates = { USD: result.USD.date, EUR: result.EUR.date };
+    state.fxSource = "自動取得";
+    writeJson(FX_KEY, result);
+    saveSettings();
+    renderFxStatus();
+    renderResults();
+  } catch {
+    state.fxSource = state.fxDate ? "保存レート" : "初期レート";
+    renderFxStatus();
+  }
+}
+
+function loadFxCache() {
+  const cached = readJson(FX_KEY, null);
+  if (!cached || !Number.isFinite(cached.USD?.rate) || !Number.isFinite(cached.EUR?.rate)) return;
+  state.settings.usdJpyRate = cached.USD.rate;
+  state.settings.eurJpyRate = cached.EUR.rate;
+  state.fxDates = {
+    USD: String(cached.USD.date || ""),
+    EUR: String(cached.EUR.date || "")
+  };
+  state.fxSource = "保存レート";
+}
+
+function renderFxStatus() {
+  const dates = [state.fxDates.USD, state.fxDates.EUR].filter(Boolean).sort();
+  const dateLabel = dates.length ? `${formatDate(dates.at(-1))}更新` : state.fxSource;
+  elements.fxStatus.textContent = `自動為替 USD/JPY ${formatRate(state.settings.usdJpyRate)}円・EUR/JPY ${formatRate(state.settings.eurJpyRate)}円（${dateLabel}）`;
+}
+
+function loadSettings() {
+  const saved = readJson(SETTINGS_KEY, {});
+  for (const [key, fallback] of Object.entries(DEFAULT_SETTINGS)) {
+    const value = Number(saved[key]);
+    state.settings[key] = Number.isFinite(value) ? value : fallback;
+  }
+}
+
+function renderSettings() {
+  for (const [key, input] of Object.entries(elements.settingsInputs)) {
+    const value = state.settings[key];
+    input.value = String(key.endsWith("Rate") ? value * 100 : value);
+  }
+}
+
+function updateSetting(key, rawValue) {
+  let value = Number(rawValue);
+  if (!Number.isFinite(value) || value < 0) return;
+  if (key.endsWith("Rate")) value /= 100;
+  state.settings[key] = value;
+  saveSettings();
+  renderResults();
+}
+
+function saveSettings() {
+  writeJson(SETTINGS_KEY, state.settings);
+}
+
+function loadCardCache() {
+  const cached = readJson(CARD_CACHE_KEY, []);
+  state.cachedCards = Array.isArray(cached) ? cached.filter(card => card?.id && card?.displayName).slice(0, 200) : [];
+}
+
+function rememberCards(cards) {
+  state.cachedCards = mergeCardCache(state.cachedCards, cards, 200);
+  writeJson(CARD_CACHE_KEY, state.cachedCards);
+}
+
+function cardImageHtml(card) {
+  const url = safeImageUrl(card?.image?.url);
+  return url
+    ? `<img src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy">`
+    : "画像なし";
+}
+
+function toYen(amount, currency) {
+  if (!Number.isFinite(amount)) return null;
+  if (currency === "JPY") return amount;
+  if (currency === "USD") return amount * state.settings.usdJpyRate;
+  if (currency === "EUR") return amount * state.settings.eurJpyRate;
+  return null;
+}
+
+function formatYen(value) {
+  return Number.isFinite(value) ? `${Math.round(value).toLocaleString("ja-JP")}円` : "未登録";
+}
+
+function formatSignedYen(value) {
+  return Number.isFinite(value) ? `${Math.round(value).toLocaleString("ja-JP")}円` : "未計算";
+}
+
+function formatInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number).toLocaleString("ja-JP") : "0";
+}
+
+function formatRate(value) {
+  return Number.isFinite(value) ? value.toLocaleString("ja-JP", { maximumFractionDigits: 2 }) : "-";
+}
+
+function formatDate(value) {
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", timeZone: "UTC" }).format(date);
+}
+
+function safeImageUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" ? url.href : "";
   } catch {
     return "";
   }
-  return "";
+}
+
+function readJson(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "null");
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    showNotification("端末への保存容量が不足しています");
+  }
+}
+
+function showNotification(message) {
+  clearTimeout(notificationTimer);
+  elements.notification.textContent = message;
+  elements.notification.classList.add("visible");
+  notificationTimer = window.setTimeout(() => elements.notification.classList.remove("visible"), 2600);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/gu, character => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    await navigator.serviceWorker.register("./sw.js?v=8");
+  } catch {
+    // The app remains usable online when service worker registration is unavailable.
+  }
 }

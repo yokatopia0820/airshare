@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-27T09:00:00+09:00",
+  "usdJpyRate": 160,
+  "defaults": {
+    "feeRate": 0.15,
+    "internationalShippingJpy": 1200,
+    "packingCostJpy": 100,
+    "fxBufferRate": 0.03,
+    "targetProfitJpy": 1000,
+    "targetRoiRate": 0.3,
+    "maxAgeDays": 14,
+    "minimumSampleCount": 3
+  },
+  "cards": [
+    {
+      "id": "ebay:jp-sv2a:gengar-094:master-ball",
+      "displayName": "ゲンガー",
+      "englishName": "Gengar",
+      "aliases": ["ゲンガー", "gengar", "SV2a", "094", "master ball"],
+      "setName": "ポケモンカード151",
+      "setCode": "SV2a",
+      "localNumber": "094/165",
+      "language": "Japanese",
+      "rarity": "Rare",
+      "variant": {
+        "code": "master_ball_mirror",
+        "label": "マスターボールミラー",
+        "foil": "Reverse Holo",
+        "mirrorPattern": "Master Ball"
+      },
+      "image": {
+        "url": "https://assets.tcgdex.net/ja/SV/SV2a/094/high.webp",
+        "verification": "base-art-with-variant-overlay",
+        "note": "正規ミラー実写画像としては未検証。"
+      },
+      "market": {
+        "source": "eBay sold research",
+        "sourceUrl": "https://www.ebay.com/",
+        "currency": "USD",
+        "salePrice": 12.5,
+        "buyerShipping": 2,
+        "condition": "Ungraded / Near Mint",
+        "sampleCount": 5,
+        "observedAt": "2026-06-27",
+        "dataKind": "sold-comparable"
+      },
+      "history": []
+    }
+  ]
+}
