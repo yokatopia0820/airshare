@@ -1,4 +1,10 @@
 const API_ROOT = "./api/pricecharting";
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+export function canUseLocalPriceApi(locationLike = globalThis.location) {
+  return String(locationLike?.protocol || "").toLowerCase() === "http:"
+    && LOOPBACK_HOSTS.has(String(locationLike?.hostname || "").toLowerCase());
+}
 
 export function buildPriceChartingQuery(card = {}) {
   const name = String(card.englishName || card.displayName || "").trim();

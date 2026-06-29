@@ -13,6 +13,7 @@ import {
 import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs";
 import { fetchJpyRates } from "./fx.mjs";
 import {
+  canUseLocalPriceApi,
   fetchPriceChartingProduct,
   getPriceChartingStatus,
   shouldFetchPriceCharting
@@ -99,7 +100,7 @@ async function initializeApp() {
   renderFxStatus();
   await Promise.all([loadCatalog(), loadPokemonNames(), loadSearchSupplements()]);
   renderLocalResults();
-  void initializePriceCharting();
+  if (canUseLocalPriceApi(window.location)) void initializePriceCharting();
   void refreshFxRate();
   void registerServiceWorker();
 }
@@ -801,7 +802,7 @@ function escapeAttr(value) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js?v=18");
+    await navigator.serviceWorker.register("./sw.js?v=19");
   } catch {
     // The app remains usable online when service worker registration is unavailable.
   }

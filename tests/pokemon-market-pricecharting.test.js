@@ -12,6 +12,14 @@ test.before(async () => {
   clientModule = await import("../pokemon-market/pricecharting.mjs");
 });
 
+test("PriceChartingローカルAPIは同一端末のHTTPだけで有効にする", () => {
+  assert.equal(clientModule.canUseLocalPriceApi(new URL("http://127.0.0.1:4174/")), true);
+  assert.equal(clientModule.canUseLocalPriceApi(new URL("http://localhost:4174/")), true);
+  assert.equal(clientModule.canUseLocalPriceApi(new URL("http://[::1]:4174/")), true);
+  assert.equal(clientModule.canUseLocalPriceApi(new URL("http://192.168.1.20:4174/")), false);
+  assert.equal(clientModule.canUseLocalPriceApi(new URL("https://example.github.io/app/")), false);
+});
+
 test("PriceChartingのセント価格を安全なUSD価格へ変換する", () => {
   assert.deepEqual(normalizePriceChartingProduct({
     id: "12345",
