@@ -36,13 +36,14 @@ USD/JPYとEUR/JPYはFrankfurterの日次レートを自動取得します。計�
 
 ## 価格データ
 
-- カード検索、画像、レアリティ、市場参考価格: TCGdex日本語・英語カードAPI
+- カード検索: TCGdex日本語全件索引（現在6,246件）
+- 画像、レアリティ、市場参考価格: TCGdex日本語・英語カードAPI
 - 日本語検索の既知の不足: 独自の小規模な検索補完データ（公式画像や本文は複製しない）
 - 価格: eBay Product Researchや許可された情報から作成した参考スナップショット
 - 必須識別: `setCode + localNumber + language + rarity + variant.code`
 - Master Ball、Poke Ball、通常、プロモ、初版、別言語は別レコード
 
-検索補完データを先に表示し、TCGdexを最大6秒だけ追加検索します。ひらがな・カタカナは同じ検索語として扱います。検索結果は最初の24件を表示し、必要な場合だけ続きを展開します。TCGplayer、Cardmarket、PriceChartingは海外参考価格として表示し、eBay実売価格として利益計算しません。国内取引価格はYahoo!オークションの落札相場、eBay価格はeBayの完了・落札検索で確認できます。
+同梱のTCGdex日本語索引と検索補完データを先に表示し、TCGdexオンライン検索を最大6秒だけ追加します。ひらがな・カタカナは同じ検索語として扱います。検索結果は最初の24件を表示し、必要な場合だけ続きを展開します。TCGplayer、Cardmarket、PriceChartingは海外参考価格として表示し、eBay実売価格として利益計算しません。国内取引価格はYahoo!オークションの落札相場、eBay価格はeBayの完了・落札検索で確認できます。
 
 TCGdexに未登録の日本語カードを完全網羅するには、再配布と商用利用が許可されたカードDB契約が別途必要です。公式サイト掲載データの一括複製や公式画像のホットリンクは行いません。
 
@@ -54,9 +55,10 @@ TCGdexに未登録の日本語カードを完全網羅するには、再配布�
 
 ```powershell
 node pokemon-market/tools/validate-snapshot.mjs pokemon-market/data/latest.json
+node pokemon-market/tools/build-tcgdex-ja-index.mjs
 ```
 
-店頭画面には管理者向けのJSON取込を置いていません。データ更新時はこのファイルを検証して差し替えます。APIキー、トークン、Cookieなどの秘密情報をJSONへ含めないでください。
+TCGdexカードDBはMITライセンスです。索引はTCGdex REST APIが返す名前、ID、番号、画像URLだけを圧縮保存し、カード画像ファイル自体は同梱しません。店頭画面には管理者向けのJSON取込を置いていません。APIキー、トークン、Cookieなどの秘密情報をJSONへ含めないでください。
 
 ## オフライン
 

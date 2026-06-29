@@ -302,6 +302,27 @@ summary:focus-visible {
   object-fit: contain;
 }
 
+.image-stack {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.image-stack > * {
+  grid-area: 1 / 1;
+}
+
+.image-stack img {
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--surface-muted);
+}
+
 .card-copy {
   min-width: 0;
 }

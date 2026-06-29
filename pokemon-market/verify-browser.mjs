@@ -77,10 +77,20 @@ async function runViewport(viewport) {
     await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 2", 8_000, "initial cards");
 
     await submitSearch(client, "かすみ");
-    await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 2", 10_000, "hiragana card results");
+    await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 10", 10_000, "hiragana card results");
     const kasumi = await inspectKasumiResults(client);
     if (screenshotDir) await captureScreenshot(client, `${viewport.name}-kasumi-results`);
 
+    await submitSearch(client, "ex");
+    await waitForCondition(client, "document.querySelectorAll('.result-card').length === 24 && document.querySelector('[data-show-more]')", 10_000, "bounded broad results");
+    const broadSearch = await client.evaluate(`(() => ({
+      count: document.querySelectorAll('.result-card').length,
+      status: document.querySelector('#searchStatus').textContent,
+      showMore: document.querySelector('[data-show-more]')?.textContent || ''
+    }))()`);
+
+    await submitSearch(client, "かすみ");
+    await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 10", 10_000, "restored Kasumi results");
     await client.evaluate(`document.querySelector('[data-rarity-filter="premium"]').click()`);
     await waitForCondition(client, "document.querySelector('#searchStatus').textContent.includes('/')", 3_000, "rarity filter");
     const rarityStatus = await client.evaluate(`document.querySelector('#searchStatus').textContent`);
@@ -104,6 +114,7 @@ async function runViewport(viewport) {
 
     const result = await inspectPage(client, viewport);
     result.kasumi = kasumi;
+    result.broadSearch = broadSearch;
     result.rarityStatus = rarityStatus;
     result.selectedKasumi = selectedKasumi;
     result.screenshotPath = await captureScreenshot(client, viewport.name);
@@ -202,12 +213,15 @@ async function setPurchasePrice(client, value) {
 function validateResult(result) {
   assert.deepEqual(result.viewport, result.expectedViewport, `${result.name}: viewport`);
   assert.equal(result.overflowX, false, `${result.name}: horizontal overflow`);
-  assert.ok(result.kasumi.count >= 2, `${result.name}: Kasumi result count ${result.kasumi.count}`);
+  assert.ok(result.kasumi.count >= 10, `${result.name}: Kasumi result count ${result.kasumi.count}`);
   assert.ok(result.kasumi.count <= 24, `${result.name}: Kasumi initial result cap ${result.kasumi.count}`);
   assert.match(result.kasumi.status, /\d+件表示/u);
   assert.ok(result.kasumi.names.includes("カスミのおねがい"), `${result.name}: Misty's Favor`);
   assert.ok(result.kasumi.names.includes("カスミの元気"), `${result.name}: Misty's Energy`);
   assert.deepEqual(result.kasumi.filters.map(item => item.label), ["すべて", "C/U", "R/RR", "AR", "SR以上", "その他"]);
+  assert.equal(result.broadSearch.count, 24, `${result.name}: broad result cap`);
+  assert.match(result.broadSearch.status, /^24\/\d+件表示/u, `${result.name}: broad result status`);
+  assert.match(result.broadSearch.showMore, /さらに表示/u, `${result.name}: show more`);
   assert.equal(result.kasumi.filters.filter(item => item.pressed === "true").length, 1);
   assert.match(result.rarityStatus, /^\d+\/\d+件表示(?:・検索中)?$/u, `${result.name}: rarity count`);
   assert.match(result.selectedKasumi.text, /カスミのおねがい/u);

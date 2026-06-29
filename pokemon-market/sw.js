@@ -1,12 +1,12 @@
-const CACHE_NAME = "pokemon-market-v19";
+const CACHE_NAME = "pokemon-market-v20";
 const CACHE_PREFIX = "pokemon-market-";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
-  "./styles.css?v=19",
+  "./styles.css?v=20",
   "./app.js",
-  "./app.js?v=19",
+  "./app.js?v=20",
   "./core.mjs",
   "./catalog.mjs",
   "./tcgdex.mjs",
@@ -15,12 +15,14 @@ const APP_SHELL = [
   "./flow.mjs",
   "./search-tools.mjs",
   "./search-session.mjs",
+  "./tcgdex-index.mjs",
   "./market-labels.mjs",
   "./storage.mjs",
   "./snapshot.mjs",
   "./data/latest.json",
   "./data/pokemon-names.json",
   "./data/search-supplements.json",
+  "./data/tcgdex-ja-index.json",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"

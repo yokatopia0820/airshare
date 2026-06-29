@@ -33,6 +33,11 @@ import {
 } from "./search-tools.mjs";
 import { createSearchSession } from "./search-session.mjs";
 import {
+  searchTcgdexIndex,
+  tcgdexIndexRowToCard,
+  validateTcgdexIndexPayload
+} from "./tcgdex-index.mjs";
+import {
   isProfitEligibleMarket,
   marketPriceLabel,
   marketSearchLinks
@@ -64,6 +69,8 @@ const state = {
   localCards: [],
   cachedCards: [],
   pokemonNames: {},
+  tcgdexIndexRows: null,
+  tcgdexIndexPromise: null,
   supplementCards: null,
   supplementCardsPromise: null,
   resultGroups: [],
@@ -100,6 +107,7 @@ async function initializeApp() {
   renderFxStatus();
   await Promise.all([loadCatalog(), loadPokemonNames(), loadSearchSupplements()]);
   renderLocalResults();
+  void loadTcgdexIndex().catch(() => {});
   if (canUseLocalPriceApi(window.location)) void initializePriceCharting();
   void refreshFxRate();
   void registerServiceWorker();
@@ -189,6 +197,11 @@ function bindEvents() {
     if (!selectButton) return;
     void selectGroup(selectButton.dataset.selectGroup);
   });
+
+  document.addEventListener("error", event => {
+    const image = event.target;
+    if (image instanceof HTMLImageElement && image.matches("[data-card-image]")) image.remove();
+  }, true);
 
   elements.rarityFilters.addEventListener("click", event => {
     const button = event.target.closest("button[data-rarity-filter]");
@@ -281,21 +294,29 @@ async function searchCards(rawQuery) {
       .then(cards => ({ cards, error: null }))
       .catch(error => ({ cards: [], error }));
 
-    let supplementCards = [];
-    try {
-      const rows = await loadSearchSupplements();
-      supplementCards = searchSupplementCards(lookupQuery, rows);
-      if (!state.searchSession.isCurrent(request.id)) return;
-      applySearchResults(lookupQuery, supplementCards);
-      renderResults();
-    } catch {
-      // TCGdex and the local cache remain available if the small supplement cannot load.
-    }
+    const [indexResult, supplementResult] = await Promise.allSettled([
+      loadTcgdexIndex(),
+      loadSearchSupplements()
+    ]);
+    const indexedCards = indexResult.status === "fulfilled"
+      ? searchTcgdexIndex(lookupQuery, indexResult.value).map(tcgdexIndexRowToCard).filter(Boolean)
+      : [];
+    const supplementCards = supplementResult.status === "fulfilled"
+      ? searchSupplementCards(lookupQuery, supplementResult.value)
+      : [];
+    const localSearchCards = [...indexedCards, ...supplementCards];
+    if (!state.searchSession.isCurrent(request.id)) return;
+    applySearchResults(lookupQuery, localSearchCards, []);
+    renderResults();
 
     const tcgdexResult = await tcgdexTask;
     if (!state.searchSession.isCurrent(request.id)) return;
-    if (tcgdexResult.error && supplementCards.length === 0) throw tcgdexResult.error;
-    applySearchResults(lookupQuery, [...supplementCards, ...tcgdexResult.cards]);
+    if (tcgdexResult.error && localSearchCards.length === 0) throw tcgdexResult.error;
+    applySearchResults(
+      lookupQuery,
+      [...localSearchCards, ...tcgdexResult.cards],
+      tcgdexResult.cards
+    );
   } catch (error) {
     if (!state.searchSession.isCurrent(request.id)) return;
     state.searchError = "通信できないため、端末内のカードだけ表示しています";
@@ -311,8 +332,8 @@ async function searchCards(rawQuery) {
   }
 }
 
-function applySearchResults(lookupQuery, remoteCards) {
-  rememberCards(remoteCards);
+function applySearchResults(lookupQuery, remoteCards, rememberedCards = remoteCards) {
+  rememberCards(rememberedCards);
   const localMatches = filterCatalogGroups(
     groupCatalogCards([...state.localCards, ...state.cachedCards]),
     lookupQuery
@@ -351,7 +372,7 @@ function renderResults() {
   if (state.searchError) {
     elements.searchStatus.textContent = state.searchError;
   } else if (state.searching) {
-    elements.searchStatus.textContent = countLabel;
+    elements.searchStatus.textContent = `${countLabel}・検索中`;
   } else if (state.query) {
     elements.searchStatus.textContent = total ? countLabel : "一致するカードがありません";
   } else {
@@ -566,6 +587,28 @@ async function loadSearchSupplements() {
   return state.supplementCardsPromise;
 }
 
+async function loadTcgdexIndex() {
+  if (state.tcgdexIndexRows) return state.tcgdexIndexRows;
+  if (!state.tcgdexIndexPromise) {
+    state.tcgdexIndexPromise = fetch("./data/tcgdex-ja-index.json", { cache: "force-cache" })
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(payload => {
+        const validation = validateTcgdexIndexPayload(payload);
+        if (!validation.ok) throw new Error(validation.errors.join("\n"));
+        state.tcgdexIndexRows = payload.cards;
+        return state.tcgdexIndexRows;
+      })
+      .catch(error => {
+        state.tcgdexIndexPromise = null;
+        throw error;
+      });
+  }
+  return state.tcgdexIndexPromise;
+}
+
 async function selectGroup(groupId) {
   const group = state.visibleGroups.find(item => item.id === groupId);
   if (!group) return;
@@ -716,7 +759,7 @@ function rememberCards(cards) {
 function cardImageHtml(card) {
   const url = safeImageUrl(card?.image?.url);
   return url
-    ? `<img src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy" referrerpolicy="no-referrer">`
+    ? `<span class="image-stack"><span>画像なし</span><img data-card-image src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy" referrerpolicy="no-referrer"></span>`
     : "画像なし";
 }
 
@@ -802,7 +845,7 @@ function escapeAttr(value) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js?v=19");
+    await navigator.serviceWorker.register("./sw.js?v=20");
   } catch {
     // The app remains usable online when service worker registration is unavailable.
   }
