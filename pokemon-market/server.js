@@ -25,7 +25,8 @@ const mimeTypes = {
 
 function createPokemonMarketServer({
   priceProvider = createPriceChartingProvider({ token: process.env.PRICECHARTING_TOKEN }),
-  now = () => new Date()
+  now = () => new Date(),
+  allowLanPriceApi = process.env.POKEMON_MARKET_ALLOW_LAN_PRICE_API === "true"
 } = {}) {
   return http.createServer((request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || `127.0.0.1:${PORT}`}`);
@@ -40,6 +41,10 @@ function createPokemonMarketServer({
     }
 
     if (url.pathname.startsWith("/api/pricecharting/")) {
+      if (!isPriceApiAllowed(request.socket?.remoteAddress, allowLanPriceApi)) {
+        sendJson(response, { ok: false, code: "local-only" }, 403);
+        return;
+      }
       void handlePriceChartingRequest(request, response, url, priceProvider, now);
       return;
     }
@@ -149,6 +154,14 @@ function getLanAddresses() {
   return addresses.length ? addresses : ["127.0.0.1"];
 }
 
+function isPriceApiAllowed(remoteAddress, allowLan = false) {
+  if (allowLan) return true;
+  const address = String(remoteAddress || "").toLowerCase();
+  return address === "127.0.0.1"
+    || address === "::1"
+    || address === "::ffff:127.0.0.1";
+}
+
 function sendJson(response, data, status = 200) {
   sendText(response, JSON.stringify(data, null, 2), "application/json; charset=utf-8", status);
 }
@@ -163,6 +176,7 @@ module.exports = {
   createPokemonMarketServer,
   normalizeRequestPath,
   isInsideRoot,
+  isPriceApiAllowed,
   getLanAddresses,
   server
 };

@@ -8,7 +8,7 @@
   <title>ポケカ仕入れ判定</title>
   <link rel="icon" href="data:,">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
   <header class="app-header">
@@ -21,21 +21,24 @@
       <form id="searchForm" class="search-form" role="search">
         <label class="visually-hidden" for="searchInput">カード名またはカード番号</label>
         <div class="search-row">
-          <input
-            id="searchInput"
-            class="search-input"
-            type="search"
-            enterkeyhint="search"
-            autocomplete="off"
-            placeholder="カード名・番号 例: ピカチュウ 025"
-          >
+          <div class="search-field">
+            <input
+              id="searchInput"
+              class="search-input"
+              type="search"
+              enterkeyhint="search"
+              autocomplete="off"
+              placeholder="カード名・番号 例: ピカチュウ 025"
+            >
+            <button id="clearSearch" class="clear-search" type="button" aria-label="検索語を消す" title="検索語を消す" hidden>×</button>
+          </div>
           <button class="search-button" type="submit">検索</button>
         </div>
       </form>
 
       <div class="result-toolbar">
         <p id="searchStatus" class="search-status" role="status">カードを検索してください</p>
-        <button id="clearSearch" class="clear-search" type="button" hidden>クリア</button>
+        <div id="rarityFilters" class="rarity-filters" role="group" aria-label="レアリティで絞り込む" hidden></div>
       </div>
 
       <section id="selectionPanel" class="selection-panel" aria-label="選択したカード" hidden>
@@ -77,6 +80,6 @@
   </footer>
 
   <div id="notification" class="notification" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script type="module" src="app.js?v=11"></script>
+  <script type="module" src="app.js?v=18"></script>
 </body>
 </html>

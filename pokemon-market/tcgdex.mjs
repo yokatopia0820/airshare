@@ -176,6 +176,7 @@ function marketValue({ source, currency, salePrice, updated, dataKind }) {
   if (!observedAt || !["USD", "EUR", "JPY"].includes(unit)) return null;
   return {
     source,
+    channel: "reference",
     currency: unit,
     salePrice,
     buyerShipping: 0,

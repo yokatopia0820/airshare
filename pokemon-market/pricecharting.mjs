@@ -37,6 +37,7 @@ export function applyPriceChartingProduct(card, product, observedAt) {
     priceChartingId: String(product.id),
     market: {
       source: "PriceCharting",
+      channel: "reference",
       currency: "USD",
       salePrice: ungradedUsd,
       buyerShipping: 0,

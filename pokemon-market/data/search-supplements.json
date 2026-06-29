@@ -1,0 +1,26 @@
+{
+  "cards": [
+    {
+      "id": "jp-50294",
+      "displayName": "カスミの元気",
+      "aliases": ["カスミ", "かすみ"],
+      "setName": "アビスアイ",
+      "setCode": "M5",
+      "localNumber": "075/081",
+      "rarity": "アンコモン",
+      "language": "日本語",
+      "sourceUrl": "https://www.pokemon-card.com/card-search/details.php/card/50294/regu/all"
+    },
+    {
+      "id": "jp-36832",
+      "displayName": "カスミのおねがい",
+      "aliases": ["カスミ", "かすみ", "Misty's Favor"],
+      "setName": "ミラクルツイン",
+      "setCode": "SM11",
+      "localNumber": "085/094",
+      "rarity": "アンコモン",
+      "language": "日本語",
+      "sourceUrl": "https://www.pokemon-card.com/card-search/details.php/card/36832"
+    }
+  ]
+}

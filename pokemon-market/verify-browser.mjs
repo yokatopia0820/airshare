@@ -76,20 +76,36 @@ async function runViewport(viewport) {
     await navigate(client, pageUrl);
     await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 2", 8_000, "initial cards");
 
-    await client.evaluate(`(() => {
-      const search = document.querySelector("#searchInput");
-      search.value = "ゲンガー 094";
-      search.dispatchEvent(new Event("input", { bubbles: true }));
-      const purchase = document.querySelector("#purchasePriceInput");
-      purchase.value = "500";
-      purchase.dispatchEvent(new Event("input", { bubbles: true }));
-    })()`);
-    await waitForCondition(client, "document.querySelectorAll('.result-card').length === 1", 3_000, "grouped search result");
+    await submitSearch(client, "かすみ");
+    await waitForCondition(client, "document.querySelectorAll('.result-card').length >= 2", 10_000, "hiragana card results");
+    const kasumi = await inspectKasumiResults(client);
+    if (screenshotDir) await captureScreenshot(client, `${viewport.name}-kasumi-results`);
 
-    await client.evaluate(`document.querySelector(".result-card .card-toggle").click()`);
-    await waitForCondition(client, "Boolean(document.querySelector('.card-calculator'))", 3_000, "expanded market details");
+    await client.evaluate(`document.querySelector('[data-rarity-filter="premium"]').click()`);
+    await waitForCondition(client, "document.querySelector('#searchStatus').textContent.includes('/')", 3_000, "rarity filter");
+    const rarityStatus = await client.evaluate(`document.querySelector('#searchStatus').textContent`);
+    await client.evaluate(`document.querySelector('[data-rarity-filter="all"]').click()`);
+
+    await client.evaluate(`(() => {
+      const card = [...document.querySelectorAll('.result-card')]
+        .find(item => item.querySelector('.card-name')?.textContent === 'カスミのおねがい');
+      card?.querySelector('.card-select')?.click();
+    })()`);
+    await waitForCondition(client, "!document.querySelector('#selectionPanel').hidden", 3_000, "selected Kasumi card");
+    await setPurchasePrice(client, "500");
+    const selectedKasumi = await inspectSelectedCard(client);
+
+    await submitSearch(client, "ゲンガー 094");
+    await waitForCondition(client, "document.querySelectorAll('.result-card').length === 1", 5_000, "reference price card");
+    await client.evaluate(`document.querySelector('.result-card .card-select').click()`);
+    await waitForCondition(client, "!document.querySelector('#selectionPanel').hidden", 3_000, "selected reference card");
+    await waitForCondition(client, "document.querySelector('.card-calculator').textContent.includes('海外参考価格')", 5_000, "reference price label");
+    await setPurchasePrice(client, "500");
 
     const result = await inspectPage(client, viewport);
+    result.kasumi = kasumi;
+    result.rarityStatus = rarityStatus;
+    result.selectedKasumi = selectedKasumi;
     result.screenshotPath = await captureScreenshot(client, viewport.name);
     result.errors = [...new Set([
       ...client.diagnostics.errors,
@@ -107,8 +123,8 @@ async function inspectPage(client, viewport) {
   const unwanted = JSON.stringify(unwantedSelectors);
   return client.evaluate(`(() => {
     const root = document.documentElement;
-    const card = document.querySelector(".result-card");
-    const profits = [...card.querySelectorAll("[data-profit-kind]")].map(item => ({
+    const selected = document.querySelector("#selectionPanel");
+    const profits = [...selected.querySelectorAll("[data-profit-kind]")].map(item => ({
       kind: item.dataset.profitKind,
       text: item.textContent.replace(/\\s+/g, " ").trim()
     }));
@@ -127,8 +143,7 @@ async function inspectPage(client, viewport) {
       viewport: [innerWidth, innerHeight],
       expectedViewport: [${viewport.width}, ${viewport.height}],
       overflowX: root.scrollWidth > root.clientWidth + 1,
-      resultCount: document.querySelectorAll(".result-card").length,
-      resultText: card.textContent.replace(/\\s+/g, " ").trim(),
+      selectedText: selected.textContent.replace(/\\s+/g, " ").trim(),
       profits,
       detailsText,
       unwantedPresent: ${unwanted}.filter(selector => document.querySelector(selector)),
@@ -147,21 +162,69 @@ async function inspectPage(client, viewport) {
   })()`);
 }
 
+async function inspectKasumiResults(client) {
+  return client.evaluate(`(() => ({
+    count: document.querySelectorAll('.result-card').length,
+    status: document.querySelector('#searchStatus').textContent,
+    names: [...document.querySelectorAll('.card-name')].map(item => item.textContent),
+    filters: [...document.querySelectorAll('[data-rarity-filter]')].map(item => ({
+      label: item.textContent,
+      pressed: item.getAttribute('aria-pressed')
+    }))
+  }))()`);
+}
+
+async function inspectSelectedCard(client) {
+  return client.evaluate(`(() => ({
+    text: document.querySelector('#selectionPanel').textContent.replace(/\\s+/g, ' ').trim(),
+    profits: [...document.querySelectorAll('[data-profit-kind]')].map(item => item.textContent.replace(/\\s+/g, ' ').trim()),
+    links: [...document.querySelectorAll('.market-links a')].map(item => ({ text: item.textContent, href: item.href }))
+  }))()`);
+}
+
+async function submitSearch(client, query) {
+  await client.evaluate(`(() => {
+    const search = document.querySelector('#searchInput');
+    search.value = ${JSON.stringify(query)};
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#searchForm').requestSubmit();
+  })()`);
+}
+
+async function setPurchasePrice(client, value) {
+  await client.evaluate(`(() => {
+    const purchase = document.querySelector('#purchasePriceInput');
+    purchase.value = ${JSON.stringify(value)};
+    purchase.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+}
+
 function validateResult(result) {
   assert.deepEqual(result.viewport, result.expectedViewport, `${result.name}: viewport`);
   assert.equal(result.overflowX, false, `${result.name}: horizontal overflow`);
-  assert.equal(result.resultCount, 1, `${result.name}: grouped result count`);
-  assert.match(result.resultText, /ゲンガー/u, `${result.name}: card name`);
-  assert.match(result.resultText, /094\/165/u, `${result.name}: card number`);
+  assert.ok(result.kasumi.count >= 2, `${result.name}: Kasumi result count ${result.kasumi.count}`);
+  assert.ok(result.kasumi.count <= 24, `${result.name}: Kasumi initial result cap ${result.kasumi.count}`);
+  assert.match(result.kasumi.status, /\d+件表示/u);
+  assert.ok(result.kasumi.names.includes("カスミのおねがい"), `${result.name}: Misty's Favor`);
+  assert.ok(result.kasumi.names.includes("カスミの元気"), `${result.name}: Misty's Energy`);
+  assert.deepEqual(result.kasumi.filters.map(item => item.label), ["すべて", "C/U", "R/RR", "AR", "SR以上", "その他"]);
+  assert.equal(result.kasumi.filters.filter(item => item.pressed === "true").length, 1);
+  assert.match(result.rarityStatus, /^\d+\/\d+件表示(?:・検索中)?$/u, `${result.name}: rarity count`);
+  assert.match(result.selectedKasumi.text, /カスミのおねがい/u);
+  assert.ok(result.selectedKasumi.profits.every(text => text.includes("eBay価格未取得")));
+  assert.equal(new URL(result.selectedKasumi.links[0].href).hostname, "auctions.yahoo.co.jp");
+  assert.equal(new URL(result.selectedKasumi.links[1].href).hostname, "www.ebay.com");
+  assert.match(result.selectedText, /ゲンガー/u, `${result.name}: card name`);
+  assert.match(result.selectedText, /094\/165/u, `${result.name}: card number`);
   assert.deepEqual(result.profits.map(item => item.kind).sort(), ["mirror", "normal", "psa10"]);
   for (const profit of result.profits) {
-    assert.match(profit.text, /利益\s-?[\d,]+円/u, `${result.name}: ${profit.kind} profit label`);
+    assert.match(profit.text, /eBay価格未取得/u, `${result.name}: ${profit.kind} eBay unavailable`);
     assert.doesNotMatch(profit.text, /NaN|Infinity/u, `${result.name}: ${profit.kind} finite`);
   }
-  assert.match(result.detailsText, /販売/u);
+  assert.match(result.detailsText, /海外参考価格/u);
   assert.match(result.detailsText, /送料/u);
-  assert.match(result.detailsText, /市場参考価格/u);
-  assert.doesNotMatch(result.detailsText, /直近1か月\s+1件売れています/u);
+  assert.match(result.detailsText, /国内取引価格を確認/u);
+  assert.match(result.detailsText, /eBay実売価格を確認/u);
   assert.deepEqual(result.unwantedPresent, [], `${result.name}: unwanted UI`);
   assert.deepEqual(result.bannedEnglishPresent, [], `${result.name}: Japanese-only condition UI`);
   assert.equal(result.footerAfterMain, true, `${result.name}: FX footer order`);

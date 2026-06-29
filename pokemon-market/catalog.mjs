@@ -1,4 +1,4 @@
-import { normalizeSearchText, searchTextForCard } from "./core.mjs?v=11";
+import { normalizeSearchText, searchTextForCard } from "./core.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

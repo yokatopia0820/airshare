@@ -1,4 +1,4 @@
-import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs?v=11";
+import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs";
 import {
   filterCatalogGroups,
   groupCatalogCards,
@@ -9,22 +9,37 @@ import {
   mergeCatalogGroups,
   shouldRefreshMarket,
   variantQuotesForGroup
-} from "./catalog.mjs?v=11";
-import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs?v=11";
-import { fetchJpyRates } from "./fx.mjs?v=11";
+} from "./catalog.mjs";
+import { fetchTcgdexCard, searchTcgdexCards } from "./tcgdex.mjs";
+import { fetchJpyRates } from "./fx.mjs";
 import {
   fetchPriceChartingProduct,
   getPriceChartingStatus,
   shouldFetchPriceCharting
-} from "./pricecharting.mjs?v=11";
+} from "./pricecharting.mjs";
 import {
   clearSourcingCard,
   createSourcingFlow,
   selectSourcingCard,
   setPurchasePrice
-} from "./flow.mjs?v=11";
+} from "./flow.mjs";
+import {
+  availableRarityFilters,
+  filterGroupsByRarity,
+  normalizeSearchText,
+  paginateGroups,
+  searchSupplementCards
+} from "./search-tools.mjs";
+import { createSearchSession } from "./search-session.mjs";
+import {
+  isProfitEligibleMarket,
+  marketPriceLabel,
+  marketSearchLinks
+} from "./market-labels.mjs";
 
 const SEARCH_DELAY_MS = 450;
+const REMOTE_SEARCH_TIMEOUT_MS = 6000;
+const RESULT_PAGE_SIZE = 24;
 const DEFAULT_USD_JPY_RATE = 160;
 const DEFAULT_EUR_JPY_RATE = 185;
 const SETTINGS_KEY = "pokemon-market:store-settings:v2";
@@ -48,7 +63,12 @@ const state = {
   localCards: [],
   cachedCards: [],
   pokemonNames: {},
+  supplementCards: null,
+  supplementCardsPromise: null,
+  resultGroups: [],
   visibleGroups: [],
+  resultLimit: RESULT_PAGE_SIZE,
+  rarityFilter: "all",
   query: "",
   flow: createSourcingFlow(),
   settings: { ...DEFAULT_SETTINGS },
@@ -56,9 +76,8 @@ const state = {
   fxSource: "初期値",
   searching: false,
   searchError: "",
-  searchRequestId: 0,
   searchTimer: 0,
-  searchController: null,
+  searchSession: createSearchSession(),
   priceLoadingIds: new Set(),
   priceChartingEnabled: false
 };
@@ -78,7 +97,7 @@ async function initializeApp() {
   bindEvents();
   renderSettings();
   renderFxStatus();
-  await Promise.all([loadCatalog(), loadPokemonNames()]);
+  await Promise.all([loadCatalog(), loadPokemonNames(), loadSearchSupplements()]);
   renderLocalResults();
   void initializePriceCharting();
   void refreshFxRate();
@@ -96,6 +115,7 @@ function cacheElements() {
   elements.chooseAnother = document.getElementById("chooseAnother");
   elements.purchasePriceInput = document.getElementById("purchasePriceInput");
   elements.searchStatus = document.getElementById("searchStatus");
+  elements.rarityFilters = document.getElementById("rarityFilters");
   elements.cardList = document.getElementById("cardList");
   elements.fxStatus = document.getElementById("fxStatus");
   elements.notification = document.getElementById("notification");
@@ -117,8 +137,13 @@ function bindEvents() {
   });
 
   elements.searchInput.addEventListener("input", event => {
+    state.searchSession.invalidate();
+    state.searching = false;
+    state.searchError = "";
     resetSelection();
     state.query = event.target.value.trim();
+    state.rarityFilter = "all";
+    state.resultLimit = RESULT_PAGE_SIZE;
     elements.clearSearch.hidden = !state.query;
     renderLocalResults();
     clearTimeout(state.searchTimer);
@@ -129,10 +154,12 @@ function bindEvents() {
 
   elements.clearSearch.addEventListener("click", () => {
     clearTimeout(state.searchTimer);
-    state.searchController?.abort();
+    state.searchSession.invalidate();
     state.query = "";
     state.searching = false;
     state.searchError = "";
+    state.rarityFilter = "all";
+    state.resultLimit = RESULT_PAGE_SIZE;
     resetSelection();
     elements.searchInput.value = "";
     elements.clearSearch.hidden = true;
@@ -146,9 +173,26 @@ function bindEvents() {
   });
 
   elements.cardList.addEventListener("click", event => {
+    const showMoreButton = event.target.closest("button[data-show-more]");
+    if (showMoreButton) {
+      state.resultLimit += RESULT_PAGE_SIZE;
+      renderResults();
+      return;
+    }
+    const resetButton = event.target.closest("button[data-reset-rarity]");
+    if (resetButton) {
+      setRarityFilter("all");
+      return;
+    }
     const selectButton = event.target.closest("button[data-select-group]");
     if (!selectButton) return;
     void selectGroup(selectButton.dataset.selectGroup);
+  });
+
+  elements.rarityFilters.addEventListener("click", event => {
+    const button = event.target.closest("button[data-rarity-filter]");
+    if (!button) return;
+    setRarityFilter(button.dataset.rarityFilter);
   });
 
   elements.chooseAnother.addEventListener("click", () => {
@@ -203,13 +247,16 @@ function applySnapshotDefaults(snapshot) {
 function renderLocalResults() {
   const searchableCards = state.query ? [...state.localCards, ...state.cachedCards] : state.localCards;
   const localGroups = groupCatalogCards(searchableCards);
-  state.visibleGroups = filterCatalogGroups(localGroups, state.query);
+  state.resultGroups = filterCatalogGroups(localGroups, normalizeSearchText(state.query));
+  applyRarityFilter();
   renderResults();
 }
 
 async function searchCards(rawQuery) {
   const query = String(rawQuery || "").normalize("NFKC").trim();
   resetSelection();
+  state.rarityFilter = "all";
+  state.resultLimit = RESULT_PAGE_SIZE;
   state.query = query;
   elements.searchInput.value = query;
   elements.clearSearch.hidden = !query;
@@ -218,40 +265,66 @@ async function searchCards(rawQuery) {
     return;
   }
 
-  const requestId = ++state.searchRequestId;
-  state.searchController?.abort();
-  state.searchController = new AbortController();
+  const request = state.searchSession.begin();
+  const remoteTimeout = window.setTimeout(request.abort, REMOTE_SEARCH_TIMEOUT_MS);
   state.searching = true;
   state.searchError = "";
   renderResults();
 
   try {
-    const remoteCards = await searchTcgdexCards(query, {
-      signal: state.searchController.signal,
+    const lookupQuery = normalizeSearchText(query);
+    const tcgdexTask = searchTcgdexCards(lookupQuery, {
+      signal: request.signal,
       pokemonNames: state.pokemonNames
-    });
-    if (requestId !== state.searchRequestId) return;
-    rememberCards(remoteCards);
+    })
+      .then(cards => ({ cards, error: null }))
+      .catch(error => ({ cards: [], error }));
 
-    const localMatches = filterCatalogGroups(groupCatalogCards([...state.localCards, ...state.cachedCards]), query);
-    state.visibleGroups = mergeCatalogGroups(localMatches, remoteCards);
+    let supplementCards = [];
+    try {
+      const rows = await loadSearchSupplements();
+      supplementCards = searchSupplementCards(lookupQuery, rows);
+      if (!state.searchSession.isCurrent(request.id)) return;
+      applySearchResults(lookupQuery, supplementCards);
+      renderResults();
+    } catch {
+      // TCGdex and the local cache remain available if the small supplement cannot load.
+    }
+
+    const tcgdexResult = await tcgdexTask;
+    if (!state.searchSession.isCurrent(request.id)) return;
+    if (tcgdexResult.error && supplementCards.length === 0) throw tcgdexResult.error;
+    applySearchResults(lookupQuery, [...supplementCards, ...tcgdexResult.cards]);
   } catch (error) {
-    if (error?.name === "AbortError") return;
+    if (!state.searchSession.isCurrent(request.id)) return;
     state.searchError = "通信できないため、端末内のカードだけ表示しています";
     const cachedGroups = groupCatalogCards([...state.localCards, ...state.cachedCards]);
-    state.visibleGroups = filterCatalogGroups(cachedGroups, query);
+    state.resultGroups = filterCatalogGroups(cachedGroups, normalizeSearchText(query));
+    applyRarityFilter();
   } finally {
-    if (requestId === state.searchRequestId) {
+    window.clearTimeout(remoteTimeout);
+    if (state.searchSession.isCurrent(request.id)) {
       state.searching = false;
       renderResults();
     }
   }
 }
 
+function applySearchResults(lookupQuery, remoteCards) {
+  rememberCards(remoteCards);
+  const localMatches = filterCatalogGroups(
+    groupCatalogCards([...state.localCards, ...state.cachedCards]),
+    lookupQuery
+  );
+  state.resultGroups = mergeCatalogGroups(localMatches, remoteCards);
+  applyRarityFilter();
+}
+
 function renderResults() {
   const selected = selectedGroup();
   elements.selectionPanel.hidden = !selected;
   elements.cardList.hidden = Boolean(selected);
+  renderRarityFilters(Boolean(selected));
 
   if (selected) {
     elements.searchStatus.textContent = "1枚選択中";
@@ -259,26 +332,63 @@ function renderResults() {
     return;
   }
 
-  if (state.searching && state.visibleGroups.length === 0) {
+  if (state.searching && state.resultGroups.length === 0) {
     elements.searchStatus.textContent = "検索中";
     elements.cardList.innerHTML = `<div class="loading-row"><span class="loading-dot"></span>カードを検索しています</div>`;
     return;
   }
 
-  const count = state.visibleGroups.length;
+  const page = paginateGroups(state.visibleGroups, state.resultLimit);
+  const count = page.shownCount;
+  const total = state.resultGroups.length;
+  const filteredTotal = page.totalCount;
+  const countLabel = count < filteredTotal
+    ? `${count}/${filteredTotal}件表示`
+    : state.rarityFilter === "all"
+      ? `${count}件表示`
+      : `${count}/${total}件表示`;
   if (state.searchError) {
     elements.searchStatus.textContent = state.searchError;
   } else if (state.searching) {
-    elements.searchStatus.textContent = `${count}件表示・検索中`;
+    elements.searchStatus.textContent = countLabel;
   } else if (state.query) {
-    elements.searchStatus.textContent = count ? `${count}件表示` : "一致するカードがありません";
+    elements.searchStatus.textContent = total ? countLabel : "一致するカードがありません";
   } else {
     elements.searchStatus.textContent = count ? "最近の価格データ" : "カードを検索してください";
   }
 
   elements.cardList.innerHTML = count
-    ? state.visibleGroups.map(searchResultHtml).join("")
-    : `<div class="empty-state">カード名または番号を変えて検索してください</div>`;
+    ? `${page.groups.map(searchResultHtml).join("")}${page.hasMore ? showMoreHtml(filteredTotal - count) : ""}`
+    : total
+      ? `<div class="empty-state">このレアリティのカードはありません<button class="empty-reset" type="button" data-reset-rarity>すべて表示</button></div>`
+      : `<div class="empty-state">カード名または番号を変えて検索してください</div>`;
+}
+
+function renderRarityFilters(selected) {
+  const filters = availableRarityFilters(state.resultGroups);
+  const shouldShow = !selected && Boolean(state.query) && state.resultGroups.length > 0 && filters.length > 1;
+  elements.rarityFilters.hidden = !shouldShow;
+  if (!shouldShow) {
+    elements.rarityFilters.innerHTML = "";
+    return;
+  }
+
+  elements.rarityFilters.innerHTML = filters.map(filter => {
+    const pressed = filter.key === state.rarityFilter;
+    return `<button type="button" data-rarity-filter="${filter.key}" aria-pressed="${pressed}" aria-label="${escapeAttr(filter.accessibleLabel)}">${escapeHtml(filter.label)}</button>`;
+  }).join("");
+}
+
+function setRarityFilter(filterKey) {
+  const available = availableRarityFilters(state.resultGroups).some(filter => filter.key === filterKey);
+  state.rarityFilter = available ? filterKey : "all";
+  state.resultLimit = RESULT_PAGE_SIZE;
+  applyRarityFilter();
+  renderResults();
+}
+
+function applyRarityFilter() {
+  state.visibleGroups = filterGroupsByRarity(state.resultGroups, state.rarityFilter);
 }
 
 function searchResultHtml(group) {
@@ -302,19 +412,27 @@ function searchResultHtml(group) {
   `;
 }
 
+function showMoreHtml(remainingCount) {
+  return `<button class="show-more" type="button" data-show-more>さらに表示（残り${formatInteger(remainingCount)}件）</button>`;
+}
+
 function renderSelectedCard() {
   const group = selectedGroup();
   if (!group) return;
   const card = group.primary;
   const quotes = variantQuotesForGroup(group);
-  const availableCount = Object.values(quotes).filter(Boolean).length;
+  const quoteValues = Object.values(quotes).filter(Boolean);
+  const availableCount = quoteValues.length;
+  const ebayCount = quoteValues.filter(quote => isProfitEligibleMarket(quote.market)).length;
   const loadingPrice = state.priceLoadingIds.has(group.id);
   const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
   const availability = loadingPrice
     ? "価格を取得中"
-    : availableCount
-      ? `${availableCount}種類の価格あり`
-      : "価格未登録";
+    : ebayCount
+      ? `${ebayCount}種類のeBay実売価格あり`
+      : availableCount
+        ? `${availableCount}種類の海外参考価格あり`
+        : "eBay価格未取得";
 
   elements.selectedCardSummary.innerHTML = `
     <span class="selected-card-thumb">${cardImageHtml(card)}</span>
@@ -332,6 +450,7 @@ function renderSelectedCard() {
     <div class="variant-list" data-variant-results="${escapeAttr(group.id)}">
       ${variantDetailsHtml(quotes)}
     </div>
+    ${marketLinksHtml(card)}
   `;
 }
 
@@ -344,8 +463,11 @@ function profitCellsHtml(quotes, loadingPrice = false) {
 function profitCellHtml(kind, quote, loadingPrice) {
   const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
   if (!quote) {
-    const unavailableText = loadingPrice ? "価格取得中" : "価格未登録";
+    const unavailableText = loadingPrice ? "価格取得中" : "eBay価格未取得";
     return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>${unavailableText}</strong></div>`;
+  }
+  if (!isProfitEligibleMarket(quote.market)) {
+    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>eBay価格未取得</strong></div>`;
   }
   const decision = calculateQuoteDecision(quote, state.flow.purchasePrice);
   if (!decision?.ready) {
@@ -389,7 +511,7 @@ function variantDetailHtml(kind, quote) {
     <div class="variant-row" data-variant="${kind}">
       <strong class="variant-name">${label}</strong>
       <div class="variant-facts">
-        <span class="sale-line">販売 ${formatYen(saleJpy)}・${shippingText}</span>
+        <span class="sale-line">${escapeHtml(marketPriceLabel(market))} ${formatYen(saleJpy)}・${shippingText}</span>
         <span class="sold-line">${activityHtml}</span>
         <span class="condition-line">${escapeHtml(japaneseCondition(market.condition))}</span>
       </div>
@@ -397,9 +519,19 @@ function variantDetailHtml(kind, quote) {
   `;
 }
 
+function marketLinksHtml(card) {
+  const links = marketSearchLinks(card);
+  return `
+    <div class="market-links" aria-label="価格を確認する">
+      <a href="${escapeAttr(links.domestic)}" target="_blank" rel="noopener noreferrer">国内取引価格を確認</a>
+      <a href="${escapeAttr(links.ebay)}" target="_blank" rel="noopener noreferrer">eBay実売価格を確認</a>
+    </div>
+  `;
+}
+
 function calculateQuoteDecision(quote, purchaseValue) {
   const validation = validatePurchasePrice(purchaseValue);
-  if (!quote || !validation.ok) return null;
+  if (!quote || !validation.ok || !isProfitEligibleMarket(quote.market)) return null;
   return calculateSourcingDecision({
     card: { ...quote.card, market: quote.market },
     purchasePriceJpy: validation.value,
@@ -410,6 +542,27 @@ function calculateQuoteDecision(quote, purchaseValue) {
 
 function selectedGroup() {
   return state.visibleGroups.find(group => group.id === state.flow.selectedGroupId) || null;
+}
+
+async function loadSearchSupplements() {
+  if (state.supplementCards) return state.supplementCards;
+  if (!state.supplementCardsPromise) {
+    state.supplementCardsPromise = fetch("./data/search-supplements.json", { cache: "force-cache" })
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(payload => {
+        if (!Array.isArray(payload?.cards)) throw new Error("検索補完データが不正です");
+        state.supplementCards = payload.cards;
+        return state.supplementCards;
+      })
+      .catch(error => {
+        state.supplementCardsPromise = null;
+        throw error;
+      });
+  }
+  return state.supplementCardsPromise;
 }
 
 async function selectGroup(groupId) {
@@ -427,7 +580,7 @@ function resetSelection() {
   if (elements.purchasePriceInput) elements.purchasePriceInput.value = "";
 }
 
-async function hydrateGroup(group, requestId = state.searchRequestId) {
+async function hydrateGroup(group, requestId = state.searchSession.currentId()) {
   if (state.priceLoadingIds.has(group.id)) return;
   state.priceLoadingIds.add(group.id);
   renderResults();
@@ -436,7 +589,7 @@ async function hydrateGroup(group, requestId = state.searchRequestId) {
     if (detail.tcgdexId && shouldRefreshMarket(detail.market)) {
       try {
         const tcgdexDetail = await fetchTcgdexCard(detail.tcgdexId, {
-          signal: state.searchController?.signal,
+          signal: state.searchSession.currentSignal(),
           language: detail.tcgdexLanguage || "ja"
         });
         if (tcgdexDetail) detail = { ...detail, ...tcgdexDetail };
@@ -444,7 +597,7 @@ async function hydrateGroup(group, requestId = state.searchRequestId) {
         // Brief search data remains usable when the detail request fails.
       }
     }
-    if (requestId !== state.searchRequestId) return;
+    if (!state.searchSession.isCurrent(requestId)) return;
 
     if (shouldFetchPriceCharting(detail, state.priceChartingEnabled)) {
       try {
@@ -453,12 +606,12 @@ async function hydrateGroup(group, requestId = state.searchRequestId) {
         // Existing market data remains usable when optional pricing fails.
       }
     }
-    if (requestId !== state.searchRequestId) return;
+    if (!state.searchSession.isCurrent(requestId)) return;
     updateGroupCard(group, detail);
     rememberCards([detail]);
   } finally {
     state.priceLoadingIds.delete(group.id);
-    if (requestId === state.searchRequestId) renderResults();
+    if (state.searchSession.isCurrent(requestId)) renderResults();
   }
 }
 
@@ -562,7 +715,7 @@ function rememberCards(cards) {
 function cardImageHtml(card) {
   const url = safeImageUrl(card?.image?.url);
   return url
-    ? `<img src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy">`
+    ? `<img src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy" referrerpolicy="no-referrer">`
     : "画像なし";
 }
 
@@ -648,7 +801,7 @@ function escapeAttr(value) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js?v=11");
+    await navigator.serviceWorker.register("./sw.js?v=18");
   } catch {
     // The app remains usable online when service worker registration is unavailable.
   }
