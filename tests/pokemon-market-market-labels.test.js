@@ -19,6 +19,21 @@ test("価格を実際の市場ソース名で表示する", () => {
   assert.equal(labels.marketPriceChannel({ source: "TCGdex TCGplayer" }), "reference");
   assert.equal(labels.isProfitEligibleMarket({ source: "eBay Product Research", dataKind: "sold-comparable" }), true);
   assert.equal(labels.isProfitEligibleMarket({ source: "TCGdex TCGplayer", dataKind: "market-reference" }), false);
+  assert.equal(labels.isReferencePriceMarket({ channel: "reference", dataKind: "market-reference" }), true);
+  assert.equal(labels.isReferencePriceMarket({ source: "PriceCharting market reference", dataKind: "manual-reference" }), true);
+  assert.equal(labels.isReferencePriceMarket({ channel: "ebay", dataKind: "sold-comparable" }), false);
+  assert.equal(labels.isCalculableMarket({
+    channel: "reference",
+    dataKind: "market-reference",
+    salePrice: 10,
+    buyerShipping: 0
+  }), true);
+  assert.equal(labels.isCalculableMarket({
+    channel: "reference",
+    dataKind: "market-reference",
+    salePrice: null,
+    buyerShipping: 0
+  }), false);
 });
 
 test("国内とeBayの確認URLをカード名から安全に組み立てる", () => {

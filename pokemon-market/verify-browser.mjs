@@ -225,14 +225,16 @@ function validateResult(result) {
   assert.equal(result.kasumi.filters.filter(item => item.pressed === "true").length, 1);
   assert.match(result.rarityStatus, /^\d+\/\d+件表示(?:・検索中)?$/u, `${result.name}: rarity count`);
   assert.match(result.selectedKasumi.text, /カスミのおねがい/u);
-  assert.ok(result.selectedKasumi.profits.every(text => text.includes("eBay価格未取得")));
+  assert.ok(result.selectedKasumi.profits.every(text => text.includes("価格未取得")));
   assert.equal(new URL(result.selectedKasumi.links[0].href).hostname, "auctions.yahoo.co.jp");
   assert.equal(new URL(result.selectedKasumi.links[1].href).hostname, "www.ebay.com");
   assert.match(result.selectedText, /ゲンガー/u, `${result.name}: card name`);
   assert.match(result.selectedText, /094\/165/u, `${result.name}: card number`);
+  assert.match(result.selectedText, /海外参考価格あり/u, `${result.name}: reference price availability`);
+  assert.doesNotMatch(result.selectedText, /価格を取得中/u, `${result.name}: contradictory loading label`);
   assert.deepEqual(result.profits.map(item => item.kind).sort(), ["mirror", "normal", "psa10"]);
   for (const profit of result.profits) {
-    assert.match(profit.text, /eBay価格未取得/u, `${result.name}: ${profit.kind} eBay unavailable`);
+    assert.match(profit.text, /参考利益\s[+-]?[\d,]+円/u, `${result.name}: ${profit.kind} reference profit`);
     assert.doesNotMatch(profit.text, /NaN|Infinity/u, `${result.name}: ${profit.kind} finite`);
   }
   assert.match(result.detailsText, /海外参考価格/u);

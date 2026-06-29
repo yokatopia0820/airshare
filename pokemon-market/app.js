@@ -38,7 +38,9 @@ import {
   validateTcgdexIndexPayload
 } from "./tcgdex-index.mjs";
 import {
+  isCalculableMarket,
   isProfitEligibleMarket,
+  isReferencePriceMarket,
   marketPriceLabel,
   marketSearchLinks
 } from "./market-labels.mjs";
@@ -448,13 +450,13 @@ function renderSelectedCard() {
   const ebayCount = quoteValues.filter(quote => isProfitEligibleMarket(quote.market)).length;
   const loadingPrice = state.priceLoadingIds.has(group.id);
   const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
-  const availability = loadingPrice
-    ? "価格を取得中"
-    : ebayCount
-      ? `${ebayCount}種類のeBay実売価格あり`
-      : availableCount
-        ? `${availableCount}種類の海外参考価格あり`
-        : "eBay価格未取得";
+  const availability = ebayCount
+    ? `${ebayCount}種類のeBay実売価格あり${loadingPrice ? "・更新中" : ""}`
+    : availableCount
+      ? `${availableCount}種類の海外参考価格あり${loadingPrice ? "・更新中" : ""}`
+      : loadingPrice
+        ? "価格を取得中"
+        : "価格未取得";
 
   elements.selectedCardSummary.innerHTML = `
     <span class="selected-card-thumb">${cardImageHtml(card)}</span>
@@ -485,11 +487,11 @@ function profitCellsHtml(quotes, loadingPrice = false) {
 function profitCellHtml(kind, quote, loadingPrice) {
   const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
   if (!quote) {
-    const unavailableText = loadingPrice ? "価格取得中" : "eBay価格未取得";
+    const unavailableText = loadingPrice ? "価格取得中" : "価格未取得";
     return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>${unavailableText}</strong></div>`;
   }
-  if (!isProfitEligibleMarket(quote.market)) {
-    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>eBay価格未取得</strong></div>`;
+  if (!isCalculableMarket(quote.market)) {
+    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>価格未取得</strong></div>`;
   }
   const decision = calculateQuoteDecision(quote, state.flow.purchasePrice);
   if (!decision?.ready) {
@@ -499,7 +501,8 @@ function profitCellHtml(kind, quote, loadingPrice) {
   const roiText = Number.isFinite(decision.roiRate)
     ? `ROI ${(decision.roiRate * 100).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}%`
     : "ROI -";
-  return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>利益 ${formatSignedYen(decision.profitJpy)}</strong><small>${roiText}</small></div>`;
+  const profitLabel = isReferencePriceMarket(quote.market) ? "参考利益" : "利益";
+  return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>${profitLabel} ${formatSignedYen(decision.profitJpy)}</strong><small>${roiText}</small></div>`;
 }
 
 function variantDetailsHtml(quotes) {
@@ -553,7 +556,7 @@ function marketLinksHtml(card) {
 
 function calculateQuoteDecision(quote, purchaseValue) {
   const validation = validatePurchasePrice(purchaseValue);
-  if (!quote || !validation.ok || !isProfitEligibleMarket(quote.market)) return null;
+  if (!quote || !validation.ok || !isCalculableMarket(quote.market)) return null;
   return calculateSourcingDecision({
     card: { ...quote.card, market: quote.market },
     purchasePriceJpy: validation.value,
@@ -636,7 +639,7 @@ async function hydrateGroup(group, requestId = state.searchSession.currentId()) 
           signal: state.searchSession.currentSignal(),
           language: detail.tcgdexLanguage || "ja"
         });
-        if (tcgdexDetail) detail = { ...detail, ...tcgdexDetail };
+        if (tcgdexDetail) detail = mergeCardCache([detail], [tcgdexDetail], 1)[0] || detail;
       } catch {
         // Brief search data remains usable when the detail request fails.
       }

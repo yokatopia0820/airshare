@@ -24,6 +24,21 @@ export function isProfitEligibleMarket(market = {}) {
   return marketPriceChannel(market) === "ebay" && market?.dataKind === "sold-comparable";
 }
 
+export function isReferencePriceMarket(market = {}) {
+  return marketPriceChannel(market) === "reference"
+    && ["market-reference", "market-average", "manual-reference"].includes(market?.dataKind);
+}
+
+export function isCalculableMarket(market = {}) {
+  const salePrice = Number(market?.salePrice);
+  const buyerShipping = Number(market?.buyerShipping);
+  const hasUsablePrice = Number.isFinite(salePrice)
+    && salePrice > 0
+    && Number.isFinite(buyerShipping)
+    && buyerShipping >= 0;
+  return hasUsablePrice && (isProfitEligibleMarket(market) || isReferencePriceMarket(market));
+}
+
 export function marketSearchLinks(card = {}) {
   const displayName = String(card?.displayName || "").normalize("NFKC").trim();
   const setCode = String(card?.setCode || "").normalize("NFKC").trim();

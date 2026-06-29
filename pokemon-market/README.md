@@ -43,7 +43,7 @@ USD/JPYとEUR/JPYはFrankfurterの日次レートを自動取得します。計�
 - 必須識別: `setCode + localNumber + language + rarity + variant.code`
 - Master Ball、Poke Ball、通常、プロモ、初版、別言語は別レコード
 
-同梱のTCGdex日本語索引と検索補完データを先に表示し、TCGdexオンライン検索を最大6秒だけ追加します。ひらがな・カタカナは同じ検索語として扱います。検索結果は最初の24件を表示し、必要な場合だけ続きを展開します。TCGplayer、Cardmarket、PriceChartingは海外参考価格として表示し、eBay実売価格として利益計算しません。国内取引価格はYahoo!オークションの落札相場、eBay価格はeBayの完了・落札検索で確認できます。
+同梱のTCGdex日本語索引と検索補完データを先に表示し、TCGdexオンライン検索を最大6秒だけ追加します。ひらがな・カタカナは同じ検索語として扱います。検索結果は最初の24件を表示し、必要な場合だけ続きを展開します。TCGplayer、Cardmarket、PriceChartingは海外参考価格として円換算し、仕入れ額入力後に「参考利益」とROIを表示します。`sold-comparable`として検証済みのeBay実売価格だけを「利益」と表示します。国内取引価格はYahoo!オークションの落札相場、eBay価格はeBayの完了・落札検索で確認できます。
 
 TCGdexに未登録の日本語カードを完全網羅するには、再配布と商用利用が許可されたカードDB契約が別途必要です。公式サイト掲載データの一括複製や公式画像のホットリンクは行いません。
 

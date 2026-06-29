@@ -1,12 +1,12 @@
-const CACHE_NAME = "pokemon-market-v20";
+const CACHE_NAME = "pokemon-market-v21";
 const CACHE_PREFIX = "pokemon-market-";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
-  "./styles.css?v=20",
+  "./styles.css?v=21",
   "./app.js",
-  "./app.js?v=20",
+  "./app.js?v=21",
   "./core.mjs",
   "./catalog.mjs",
   "./tcgdex.mjs",

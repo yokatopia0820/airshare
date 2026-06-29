@@ -6,7 +6,7 @@
 
 ## Data Rules
 
-- TCGdexのカード詳細に含まれるTCGplayerまたはCardmarket価格だけを自動利用する。
+- TCGdexのカード詳細に含まれるTCGplayer／Cardmarket価格と、既存の検証済みPriceCharting参考価格を利用する。
 - TCGplayer価格はUSD、Cardmarket価格はEURとして当日為替レートで円換算する。
 - eBay実売データではない価格を「eBay価格」と表示しない。
 - eBay実売スナップショットがある場合は、従来どおりeBay価格と利益を優先する。
