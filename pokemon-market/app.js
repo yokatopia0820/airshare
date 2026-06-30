@@ -2,9 +2,7 @@ import { calculateSourcingDecision, validatePurchasePrice } from "./core.mjs";
 import {
   filterCatalogGroups,
   groupCatalogCards,
-  japaneseCondition,
   japaneseLanguage,
-  marketActivityLabel,
   mergeCardCache,
   mergeCatalogGroups,
   shouldRefreshMarket,
@@ -39,11 +37,18 @@ import {
 } from "./tcgdex-index.mjs";
 import {
   isCalculableMarket,
-  isProfitEligibleMarket,
   isReferencePriceMarket,
-  marketPriceLabel,
   marketSearchLinks
 } from "./market-labels.mjs";
+import { buildMarketEvidence, sparklinePoints } from "./market-evidence.mjs";
+import {
+  clearCacheFailure,
+  createCardCacheEnvelope,
+  readCardCacheEnvelope,
+  recordCacheFailure,
+  shouldRetryFailure,
+  tcgdexImageCandidates
+} from "./card-cache.mjs";
 
 const SEARCH_DELAY_MS = 450;
 const REMOTE_SEARCH_TIMEOUT_MS = 6000;
@@ -52,7 +57,8 @@ const DEFAULT_USD_JPY_RATE = 160;
 const DEFAULT_EUR_JPY_RATE = 185;
 const SETTINGS_KEY = "pokemon-market:store-settings:v2";
 const FX_KEY = "pokemon-market:fx:v2";
-const CARD_CACHE_KEY = "pokemon-market:tcgdex-cache:v1";
+const CARD_CACHE_KEY = "pokemon-market:tcgdex-cache:v2";
+const LEGACY_CARD_CACHE_KEY = "pokemon-market:tcgdex-cache:v1";
 
 const DEFAULT_SETTINGS = {
   usdJpyRate: DEFAULT_USD_JPY_RATE,
@@ -70,6 +76,7 @@ const DEFAULT_SETTINGS = {
 const state = {
   localCards: [],
   cachedCards: [],
+  cacheFailures: {},
   pokemonNames: {},
   tcgdexIndexRows: null,
   tcgdexIndexPromise: null,
@@ -89,6 +96,7 @@ const state = {
   searchTimer: 0,
   searchSession: createSearchSession(),
   priceLoadingIds: new Set(),
+  priceProviderStates: new Map(),
   priceChartingEnabled: false
 };
 
@@ -202,7 +210,14 @@ function bindEvents() {
 
   document.addEventListener("error", event => {
     const image = event.target;
-    if (image instanceof HTMLImageElement && image.matches("[data-card-image]")) image.remove();
+    if (!(image instanceof HTMLImageElement) || !image.matches("[data-card-image]")) return;
+    const fallback = safeImageUrl(image.dataset.fallbackSrc);
+    if (fallback && image.src !== fallback) {
+      image.dataset.fallbackSrc = "";
+      image.src = fallback;
+      return;
+    }
+    image.remove();
   }, true);
 
   elements.rarityFilters.addEventListener("click", event => {
@@ -445,36 +460,108 @@ function renderSelectedCard() {
   if (!group) return;
   const card = group.primary;
   const quotes = variantQuotesForGroup(group);
-  const quoteValues = Object.values(quotes).filter(Boolean);
-  const availableCount = quoteValues.length;
-  const ebayCount = quoteValues.filter(quote => isProfitEligibleMarket(quote.market)).length;
   const loadingPrice = state.priceLoadingIds.has(group.id);
+  const evidence = buildMarketEvidence(group, {
+    loading: loadingPrice,
+    providerState: providerStateForGroup(group)
+  });
+  const availableChannels = Object.values(evidence.lanes).filter(lane => lane.status === "available");
   const rarity = card.rarity && !card.rarity.includes("未登録") ? ` / ${escapeHtml(card.rarity)}` : "";
-  const availability = ebayCount
-    ? `${ebayCount}種類のeBay実売価格あり${loadingPrice ? "・更新中" : ""}`
-    : availableCount
-      ? `${availableCount}種類の海外参考価格あり${loadingPrice ? "・更新中" : ""}`
-      : loadingPrice
-        ? "価格を取得中"
-        : "価格未取得";
+  const availability = evidenceAvailability(evidence, loadingPrice);
 
   elements.selectedCardSummary.innerHTML = `
     <span class="selected-card-thumb">${cardImageHtml(card)}</span>
     <span class="card-copy">
       <span class="card-name">${escapeHtml(card.displayName)}</span>
       <span class="card-meta">${escapeHtml(card.setName || card.setCode)} ${escapeHtml(card.localNumber || "")}${rarity}・${escapeHtml(japaneseLanguage(card.language))}</span>
-      <span class="price-availability${availableCount ? "" : " none"}">${availability}</span>
+      <span class="price-availability${availableChannels.length ? "" : " none"}">${availability}</span>
     </span>
   `;
   if (document.activeElement !== elements.purchasePriceInput) {
     elements.purchasePriceInput.value = state.flow.purchasePrice;
   }
   elements.selectedProfit.innerHTML = profitCellsHtml(quotes, loadingPrice);
-  elements.selectedMarket.innerHTML = `
-    <div class="variant-list" data-variant-results="${escapeAttr(group.id)}">
-      ${variantDetailsHtml(quotes)}
+  elements.selectedMarket.innerHTML = marketEvidenceHtml(evidence, card, group.id);
+}
+
+function providerStateForGroup(group) {
+  const current = state.priceProviderStates.get(group.id);
+  if (current) return current;
+  const failure = state.cacheFailures[group?.primary?.id];
+  if (failure && !shouldRetryFailure(state.cacheFailures, group.primary.id)) {
+    return { reference: "unavailable" };
+  }
+  return {};
+}
+
+function evidenceAvailability(evidence, loadingPrice) {
+  if (evidence.lanes.ebay.status === "available") return `eBay Sold価格あり${loadingPrice ? "・更新中" : ""}`;
+  if (evidence.lanes.domestic.status === "available") return `国内相場あり${loadingPrice ? "・更新中" : ""}`;
+  if (evidence.lanes.reference.status === "available") return `海外参考価格あり${loadingPrice ? "・更新中" : ""}`;
+  return loadingPrice ? "相場データを更新中" : "相場データを収集中";
+}
+
+function marketEvidenceHtml(evidence, card, groupId) {
+  const trend = evidence.trend;
+  const sourceText = evidence.sources.length
+    ? evidence.sources.map(escapeHtml).join("・")
+    : "取得先への接続待ち";
+  const updatedText = evidence.updatedAt
+    ? formatDateTime(evidence.updatedAt)
+    : "更新記録を収集中";
+  const trendHtml = trend.status === "available"
+    ? `<svg class="trend-sparkline" viewBox="0 0 120 46" role="img" aria-label="価格推移"><polyline points="${sparklinePoints(trend.values)}"></polyline></svg>
+       <strong class="trend-change ${trend.changeRate >= 0 ? "up" : "down"}">${trend.changeRate >= 0 ? "+" : ""}${(trend.changeRate * 100).toLocaleString("ja-JP", { maximumFractionDigits: 1 })}%</strong>`
+    : `<span class="evidence-message">${escapeHtml(trend.message)}</span>`;
+
+  return `
+    <div class="market-evidence" data-market-evidence="${escapeAttr(groupId)}">
+      ${marketEvidenceLaneHtml("eBay Sold価格", evidence.lanes.ebay)}
+      ${marketEvidenceLaneHtml("国内相場", evidence.lanes.domestic)}
+      ${marketEvidenceLaneHtml("海外参考価格", evidence.lanes.reference)}
+      <div class="trend-panel">
+        <span class="evidence-label">価格推移</span>
+        <div class="trend-content">${trendHtml}</div>
+      </div>
+      <div class="evidence-meta">
+        <span><b>最終更新</b> ${escapeHtml(updatedText)}</span>
+        <span><b>取得元</b> ${sourceText}</span>
+      </div>
+      ${marketLinksHtml(card)}
     </div>
-    ${marketLinksHtml(card)}
+  `;
+}
+
+function marketEvidenceLaneHtml(label, lane) {
+  if (lane.status !== "available" || !lane.market) {
+    return `
+      <div class="evidence-lane is-${escapeAttr(lane.status)}">
+        <span class="evidence-label">${escapeHtml(label)}</span>
+        <span class="evidence-message">${escapeHtml(lane.message)}</span>
+      </div>
+    `;
+  }
+
+  const market = lane.market;
+  const saleJpy = toYen(Number(market.salePrice), market.currency);
+  const sampleCount = Number(market.sampleCount);
+  const soldHtml = market.dataKind === "sold-comparable" && Number.isFinite(sampleCount) && sampleCount > 0
+    ? `<span class="evidence-sold">直近1か月 <strong>${formatInteger(sampleCount)}件</strong>売れています</span>`
+    : "";
+  const shippingJpy = toYen(Number(market.buyerShipping), market.currency);
+  const shippingHtml = market.dataKind === "sold-comparable" && Number.isFinite(shippingJpy)
+    ? `<span class="evidence-shipping">送料 ${formatYen(shippingJpy)}</span>`
+    : "";
+
+  return `
+    <div class="evidence-lane is-available">
+      <span class="evidence-label">${escapeHtml(label)}</span>
+      <div class="evidence-value">
+        <strong class="evidence-price">${formatYen(saleJpy)}</strong>
+        ${shippingHtml}
+        ${soldHtml}
+      </div>
+    </div>
   `;
 }
 
@@ -487,11 +574,11 @@ function profitCellsHtml(quotes, loadingPrice = false) {
 function profitCellHtml(kind, quote, loadingPrice) {
   const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
   if (!quote) {
-    const unavailableText = loadingPrice ? "価格取得中" : "価格未取得";
+    const unavailableText = loadingPrice ? "相場を更新中" : "計算できる相場を収集中";
     return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>${unavailableText}</strong></div>`;
   }
   if (!isCalculableMarket(quote.market)) {
-    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>価格未取得</strong></div>`;
+    return `<div class="profit-cell unavailable" data-profit-kind="${kind}"><span>${label}</span><strong>計算対象外の相場です</strong></div>`;
   }
   const decision = calculateQuoteDecision(quote, state.flow.purchasePrice);
   if (!decision?.ready) {
@@ -505,51 +592,13 @@ function profitCellHtml(kind, quote, loadingPrice) {
   return `<div class="profit-cell ${className}" data-profit-kind="${kind}"><span>${label}</span><strong>${profitLabel} ${formatSignedYen(decision.profitJpy)}</strong><small>${roiText}</small></div>`;
 }
 
-function variantDetailsHtml(quotes) {
-  return ["normal", "mirror", "psa10"]
-    .map(kind => variantDetailHtml(kind, quotes[kind]))
-    .join("");
-}
-
-function variantDetailHtml(kind, quote) {
-  const label = { normal: "通常", mirror: "ミラー", psa10: "PSA10" }[kind];
-  if (!quote) {
-    return `
-      <div class="variant-row unavailable" data-variant="${kind}">
-        <strong class="variant-name">${label}</strong>
-        <span class="unavailable-copy">価格未登録</span>
-      </div>
-    `;
-  }
-
-  const market = quote.market;
-  const saleJpy = toYen(market.salePrice, market.currency);
-  const shippingJpy = toYen(market.buyerShipping, market.currency);
-  const shippingText = ["market-average", "market-reference"].includes(market.dataKind)
-    ? "送料収入なしで計算"
-    : `送料 ${formatYen(shippingJpy)}`;
-  const activityHtml = market.dataKind === "sold-comparable"
-    ? `直近1か月 <strong>${formatInteger(market.sampleCount)}件</strong>売れています`
-    : escapeHtml(marketActivityLabel(market));
-
-  return `
-    <div class="variant-row" data-variant="${kind}">
-      <strong class="variant-name">${label}</strong>
-      <div class="variant-facts">
-        <span class="sale-line">${escapeHtml(marketPriceLabel(market))} ${formatYen(saleJpy)}・${shippingText}</span>
-        <span class="sold-line">${activityHtml}</span>
-        <span class="condition-line">${escapeHtml(japaneseCondition(market.condition))}</span>
-      </div>
-    </div>
-  `;
-}
-
 function marketLinksHtml(card) {
   const links = marketSearchLinks(card);
   return `
     <div class="market-links" aria-label="価格を確認する">
-      <a href="${escapeAttr(links.domestic)}" target="_blank" rel="noopener noreferrer">国内取引価格を確認</a>
-      <a href="${escapeAttr(links.ebay)}" target="_blank" rel="noopener noreferrer">eBay実売価格を確認</a>
+      <a href="${escapeAttr(links.ebay)}" target="_blank" rel="noopener noreferrer">eBay Soldを確認</a>
+      <a href="${escapeAttr(links.domesticChart)}" target="_blank" rel="noopener noreferrer">みんなのポケカ相場</a>
+      <a href="${escapeAttr(links.domestic)}" target="_blank" rel="noopener noreferrer">国内取引を確認</a>
     </div>
   `;
 }
@@ -630,19 +679,31 @@ function resetSelection() {
 async function hydrateGroup(group, requestId = state.searchSession.currentId()) {
   if (state.priceLoadingIds.has(group.id)) return;
   state.priceLoadingIds.add(group.id);
+  const providerState = {};
   renderResults();
   try {
     let detail = group.primary;
-    if (detail.tcgdexId && shouldRefreshMarket(detail.market)) {
+    const needsTcgdexDetail = detail.tcgdexId
+      && (shouldRefreshMarket(detail.market) || !tcgdexImageCandidates(detail).length);
+    if (needsTcgdexDetail && shouldRetryFailure(state.cacheFailures, detail.id)) {
       try {
         const tcgdexDetail = await fetchTcgdexCard(detail.tcgdexId, {
           signal: state.searchSession.currentSignal(),
           language: detail.tcgdexLanguage || "ja"
         });
-        if (tcgdexDetail) detail = mergeCardCache([detail], [tcgdexDetail], 1)[0] || detail;
+        if (tcgdexDetail) {
+          detail = mergeCardCache([detail], [tcgdexDetail], 1)[0] || detail;
+          state.cacheFailures = clearCacheFailure(state.cacheFailures, detail.id);
+        } else {
+          state.cacheFailures = recordCacheFailure(state.cacheFailures, detail.id, "not-found");
+          providerState.reference = "no-results";
+        }
       } catch {
-        // Brief search data remains usable when the detail request fails.
+        state.cacheFailures = recordCacheFailure(state.cacheFailures, detail.id, "network");
+        providerState.reference = "unavailable";
       }
+    } else if (needsTcgdexDetail) {
+      providerState.reference = "unavailable";
     }
     if (!state.searchSession.isCurrent(requestId)) return;
 
@@ -650,14 +711,16 @@ async function hydrateGroup(group, requestId = state.searchSession.currentId()) 
       try {
         detail = await fetchPriceChartingProduct(detail) || detail;
       } catch {
-        // Existing market data remains usable when optional pricing fails.
+        if (!detail.market) providerState.reference = "unavailable";
       }
     }
     if (!state.searchSession.isCurrent(requestId)) return;
     updateGroupCard(group, detail);
     rememberCards([detail]);
+    state.priceProviderStates.set(group.id, providerState);
   } finally {
     state.priceLoadingIds.delete(group.id);
+    persistCardCache();
     if (state.searchSession.isCurrent(requestId)) renderResults();
   }
 }
@@ -665,7 +728,9 @@ async function hydrateGroup(group, requestId = state.searchSession.currentId()) 
 function needsPriceHydration(group) {
   const card = group?.primary;
   return Boolean(
-    card?.tcgdexId && shouldRefreshMarket(card.market)
+    card?.tcgdexId
+      && (shouldRefreshMarket(card.market) || !tcgdexImageCandidates(card).length)
+      && shouldRetryFailure(state.cacheFailures, card.id)
     || shouldFetchPriceCharting(card, state.priceChartingEnabled)
   );
 }
@@ -698,7 +763,7 @@ async function refreshFxRate() {
     renderFxStatus();
     renderResults();
   } catch {
-    state.fxSource = state.fxDate ? "保存レート" : "初期レート";
+    state.fxSource = state.fxDates.USD || state.fxDates.EUR ? "保存レート" : "初期レート";
     renderFxStatus();
   }
 }
@@ -750,19 +815,40 @@ function saveSettings() {
 }
 
 function loadCardCache() {
-  const cached = readJson(CARD_CACHE_KEY, []);
-  state.cachedCards = Array.isArray(cached) ? cached.filter(card => card?.id && card?.displayName).slice(0, 200) : [];
+  let payload = "";
+  let usedLegacyKey = false;
+  try {
+    payload = localStorage.getItem(CARD_CACHE_KEY) || "";
+    if (!payload) {
+      payload = localStorage.getItem(LEGACY_CARD_CACHE_KEY) || "";
+      usedLegacyKey = Boolean(payload);
+    }
+  } catch {
+    payload = "";
+  }
+  const cached = readCardCacheEnvelope(payload);
+  state.cachedCards = cached.cards.filter(card => card?.id && card?.displayName).slice(-500);
+  state.cacheFailures = cached.failures;
+  if (cached.migrated || usedLegacyKey) persistCardCache();
 }
 
 function rememberCards(cards) {
-  state.cachedCards = mergeCardCache(state.cachedCards, cards, 200);
-  writeJson(CARD_CACHE_KEY, state.cachedCards);
+  state.cachedCards = mergeCardCache(state.cachedCards, cards, 500);
+  persistCardCache();
+}
+
+function persistCardCache() {
+  writeJson(CARD_CACHE_KEY, createCardCacheEnvelope(state.cachedCards, {
+    limit: 500,
+    failures: state.cacheFailures
+  }));
 }
 
 function cardImageHtml(card) {
-  const url = safeImageUrl(card?.image?.url);
+  const candidates = tcgdexImageCandidates(card).map(safeImageUrl).filter(Boolean);
+  const [url, fallback = ""] = candidates;
   return url
-    ? `<span class="image-stack"><span>画像なし</span><img data-card-image src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy" referrerpolicy="no-referrer"></span>`
+    ? `<span class="image-stack"><span>画像を収集中</span><img data-card-image data-fallback-src="${escapeAttr(fallback)}" src="${escapeAttr(url)}" alt="${escapeAttr(card.displayName)}" loading="lazy" referrerpolicy="no-referrer"></span>`
     : "画像なし";
 }
 
@@ -796,6 +882,20 @@ function formatDate(value) {
   return Number.isNaN(date.getTime())
     ? value
     : new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", timeZone: "UTC" }).format(date);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? String(value || "")
+    : new Intl.DateTimeFormat("ja-JP", {
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Tokyo"
+      }).format(date);
 }
 
 function safeImageUrl(value) {

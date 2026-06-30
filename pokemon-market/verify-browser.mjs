@@ -225,9 +225,11 @@ function validateResult(result) {
   assert.equal(result.kasumi.filters.filter(item => item.pressed === "true").length, 1);
   assert.match(result.rarityStatus, /^\d+\/\d+件表示(?:・検索中)?$/u, `${result.name}: rarity count`);
   assert.match(result.selectedKasumi.text, /カスミのおねがい/u);
-  assert.ok(result.selectedKasumi.profits.every(text => text.includes("価格未取得")));
-  assert.equal(new URL(result.selectedKasumi.links[0].href).hostname, "auctions.yahoo.co.jp");
-  assert.equal(new URL(result.selectedKasumi.links[1].href).hostname, "www.ebay.com");
+  assert.ok(result.selectedKasumi.profits.every(text => /相場を(?:更新中|収集中)/u.test(text)));
+  assert.doesNotMatch(result.selectedKasumi.text, /価格なし|価格未取得|価格未登録/u);
+  assert.equal(new URL(result.selectedKasumi.links[0].href).hostname, "www.ebay.com");
+  assert.equal(new URL(result.selectedKasumi.links[1].href).hostname, "pokeca-chart.com");
+  assert.equal(new URL(result.selectedKasumi.links[2].href).hostname, "auctions.yahoo.co.jp");
   assert.match(result.selectedText, /ゲンガー/u, `${result.name}: card name`);
   assert.match(result.selectedText, /094\/165/u, `${result.name}: card number`);
   assert.match(result.selectedText, /海外参考価格あり/u, `${result.name}: reference price availability`);
@@ -237,10 +239,14 @@ function validateResult(result) {
     assert.match(profit.text, /参考利益\s[+-]?[\d,]+円/u, `${result.name}: ${profit.kind} reference profit`);
     assert.doesNotMatch(profit.text, /NaN|Infinity/u, `${result.name}: ${profit.kind} finite`);
   }
+  assert.match(result.detailsText, /eBay Sold価格/u);
+  assert.match(result.detailsText, /国内相場/u);
   assert.match(result.detailsText, /海外参考価格/u);
-  assert.match(result.detailsText, /送料/u);
-  assert.match(result.detailsText, /国内取引価格を確認/u);
-  assert.match(result.detailsText, /eBay実売価格を確認/u);
+  assert.match(result.detailsText, /価格推移/u);
+  assert.match(result.detailsText, /最終更新/u);
+  assert.match(result.detailsText, /取得元/u);
+  assert.match(result.detailsText, /みんなのポケカ相場/u);
+  assert.match(result.detailsText, /eBay Soldを確認/u);
   assert.deepEqual(result.unwantedPresent, [], `${result.name}: unwanted UI`);
   assert.deepEqual(result.bannedEnglishPresent, [], `${result.name}: Japanese-only condition UI`);
   assert.equal(result.footerAfterMain, true, `${result.name}: FX footer order`);

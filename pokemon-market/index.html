@@ -8,7 +8,7 @@
   <title>ポケカ仕入れ判定</title>
   <link rel="icon" href="data:,">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
   <header class="app-header">
@@ -45,6 +45,7 @@
         <article class="selected-card">
           <div id="selectedCardSummary" class="selected-card-summary"></div>
           <button id="chooseAnother" class="choose-another" type="button">選び直す</button>
+          <div id="selectedMarket" class="card-calculator"></div>
 
           <div class="store-price-row">
             <label for="purchasePriceInput">仕入れ金額</label>
@@ -55,7 +56,6 @@
           </div>
 
           <div id="selectedProfit" class="profit-strip" aria-label="種類別利益" aria-live="polite"></div>
-          <div id="selectedMarket" class="card-calculator"></div>
         </article>
       </section>
 
@@ -80,6 +80,6 @@
   </footer>
 
   <div id="notification" class="notification" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script type="module" src="app.js?v=21"></script>
+  <script type="module" src="app.js?v=22"></script>
 </body>
 </html>

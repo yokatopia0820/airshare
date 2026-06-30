@@ -495,8 +495,113 @@ summary:focus-visible {
 }
 
 .card-calculator {
-  padding: 0 10px 12px;
+  padding: 0;
   border-top: 1px solid var(--line);
+}
+
+.market-evidence {
+  display: grid;
+}
+
+.evidence-lane,
+.trend-panel {
+  display: grid;
+  grid-template-columns: minmax(104px, 0.72fr) minmax(0, 1.28fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.evidence-lane:first-child {
+  min-height: 76px;
+  background: #f7fbff;
+}
+
+.evidence-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.evidence-value {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.evidence-price {
+  color: var(--text);
+  font-size: 1.22rem;
+  line-height: 1.15;
+}
+
+.evidence-lane:first-child .evidence-price {
+  color: var(--brand-dark);
+  font-size: 1.45rem;
+}
+
+.evidence-shipping,
+.evidence-sold,
+.evidence-message {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.evidence-sold strong {
+  color: var(--text);
+  font-size: 1.04rem;
+}
+
+.trend-content {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.trend-sparkline {
+  width: min(120px, 70%);
+  height: 46px;
+  overflow: visible;
+}
+
+.trend-sparkline polyline {
+  fill: none;
+  stroke: var(--brand);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend-change {
+  font-size: 0.88rem;
+}
+
+.trend-change.up {
+  color: var(--positive);
+}
+
+.trend-change.down {
+  color: var(--negative);
+}
+
+.evidence-meta {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.evidence-meta b {
+  color: var(--text);
 }
 
 .variant-list {
@@ -609,9 +714,9 @@ summary:focus-visible {
 
 .market-links {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
-  padding-top: 10px;
+  padding: 8px 12px 12px;
 }
 
 .market-links a {
@@ -628,6 +733,19 @@ summary:focus-visible {
   font-weight: 800;
   line-height: 1.25;
   text-decoration: none;
+}
+
+@media (max-width: 374px) {
+  .evidence-lane,
+  .trend-panel {
+    grid-template-columns: minmax(90px, 0.65fr) minmax(0, 1.35fr);
+    gap: 8px;
+  }
+
+  .market-links a {
+    padding-inline: 4px;
+    font-size: 0.68rem;
+  }
 }
 
 @media (max-width: 374px) {

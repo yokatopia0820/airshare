@@ -42,6 +42,7 @@ test("国内とeBayの確認URLをカード名から安全に組み立てる", (
   assert.equal(new URL(links.domestic).hostname, "auctions.yahoo.co.jp");
   assert.equal(new URL(links.domestic).pathname, "/closedsearch/closedsearch");
   assert.match(decodeURIComponent(links.domestic), /カスミのおねがい/u);
+  assert.equal(links.domesticChart, "https://pokeca-chart.com/");
   assert.equal(new URL(links.ebay).hostname, "www.ebay.com");
   assert.equal(new URL(links.ebay).searchParams.get("LH_Sold"), "1");
 });

@@ -54,5 +54,9 @@ export function marketSearchLinks(card = {}) {
   ebay.searchParams.set("LH_Complete", "1");
   ebay.searchParams.set("LH_Sold", "1");
 
-  return { domestic: domestic.toString(), ebay: ebay.toString() };
+  return {
+    domestic: domestic.toString(),
+    domesticChart: "https://pokeca-chart.com/",
+    ebay: ebay.toString()
+  };
 }
