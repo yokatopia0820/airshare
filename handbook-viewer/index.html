@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>技術料一覧 | KAIBA</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="技術料一覧の先頭へ">
+          <span class="brand-mark" aria-hidden="true">K</span>
+          <span>KAIBA <small>Service Handbook</small></span>
+        </a>
+        <p class="source-state"><span class="state-dot"></span>検証済み索引</p>
+      </header>
+
+      <section class="hero" id="top" aria-labelledby="page-title">
+        <p class="eyebrow">2026.02 EDITION</p>
+        <h1 id="page-title">技術料を、<br>確かな根拠と。</h1>
+        <p class="intro">ランク・時間・金額から一覧を検索し、該当する原本ページの行をその場で確認できます。</p>
+      </section>
+
+      <section class="search-panel" aria-label="技術料を検索">
+        <label class="search-box" for="search-input">
+          <span aria-hidden="true">⌕</span>
+          <input id="search-input" type="search" autocomplete="off" placeholder="例：Dランク、60分、16,000円、#H" autofocus>
+          <kbd>Esc</kbd>
+        </label>
+        <div class="filter-row" aria-label="絞り込み">
+          <div class="segmented" role="group" aria-label="表の種類">
+            <button type="button" class="is-active" data-filter="mark" data-value="all">すべて</button>
+            <button type="button" data-filter="mark" data-value="dollar">＄ 表</button>
+            <button type="button" data-filter="mark" data-value="sharp">＃ 表</button>
+          </div>
+          <div class="segmented" role="group" aria-label="製品区分">
+            <button type="button" class="is-active" data-filter="category" data-value="all">全製品</button>
+            <button type="button" data-filter="category" data-value="general">一般製品</button>
+            <button type="button" data-filter="category" data-value="aircon">エアコン</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="検索結果と原本表示">
+        <section class="results-panel" aria-labelledby="results-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">SEARCH RESULTS</p>
+              <h2 id="results-title">該当する技術料</h2>
+            </div>
+            <output id="result-count" aria-live="polite"></output>
+          </div>
+          <div id="result-list" class="result-list" aria-live="polite"></div>
+        </section>
+
+        <aside class="evidence-panel" aria-labelledby="evidence-title">
+          <div class="section-heading evidence-heading">
+            <div>
+              <p class="eyebrow">SOURCE EVIDENCE</p>
+              <h2 id="evidence-title">原本の該当行</h2>
+            </div>
+            <span id="page-label" class="page-label">PDF 7 / 印刷 5</span>
+          </div>
+          <p id="selection-summary" class="selection-summary">検索結果を選ぶと、原本ページ内の該当行を強調表示します。</p>
+          <div class="document-frame">
+            <div id="page-stage" class="page-stage" tabindex="0" aria-label="サービスハンドブックの原本ページ">
+              <img id="source-page" src="./assets/fee-page-7.png" alt="2026年2月サービスハンドブック PDF 7ページ 技術料一覧表">
+              <div id="evidence-highlight" class="evidence-highlight" hidden aria-hidden="true"><span>該当行</span></div>
+            </div>
+          </div>
+          <p class="evidence-note">表示内容は検索用の索引です。料金確定には、黄色で示す原本の行と請求区分を確認してください。</p>
+        </aside>
+      </section>
+    </main>
+    <script src="./technical-fee-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
